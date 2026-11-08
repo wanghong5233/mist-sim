@@ -107,6 +107,18 @@ logs/runs/<运行名>/
 
 收敛图可用iteration作横轴；一个iteration是一个层的新rollout加一次PPO更新，stage/layer区分预训练、慢层和快层，不能混成同一条回报曲线。跨算法比较优先用total_slots（累计实际训练交互槽数），避免各方法每次迭代的数据量不同。原始CSV不平滑、不舍弃点；绘图时可额外展示滚动均值，并注明窗口。
 
+记录接口分工：RunStore.event只写排障日志/TensorBoard，不创建结果目录；record_episode、record_validation、record_evaluation显式保存对应数值结果。验证同时输出validation_trajectories.csv，逐条保留轨迹种子、到达/完成数及全部评价指标，用于后续复算与配对统计，不必从日志提取。目录按首次实际写入创建，不初始化空CSV或示意曲线。
+
+|结果表|一行对应什么|奖励与统计口径|
+|---|---|---|
+|iterations.csv|单层一次新rollout及随后的PPO更新|原始reward总和/物理槽数；loss按小批次样本数加权，epoch重复不增加奖励样本|
+|episodes.csv|一个完整episode|raw_return为完整累计回报；不是单步均值，截断片段不当完整episode|
+|validation.csv|固定开发集的一次评价|return_per_episode为轨迹回报均值；service为总完成/总到达|
+|validation_trajectories.csv|某次开发评价的一条轨迹|保留轨迹种子和原始计数，支持独立复算与配对统计|
+|evaluation.csv|一次独立评价|保留服务、时延、能耗分项及控制指标；不与训练loss混用|
+
+奖励是稠密的逐物理槽负成本，慢层累计控制区间奖励；rollout负责收集，不另外制造奖励。PPO loss是训练损失，固定开发集成本/按时率/能耗才是协议学习曲线的主要性能指标。
+
 iterations.csv保存原始reward总和/每物理槽均值、归一化训练reward、完整能耗、服务指标、实际epoch数及loss。loss是所有已执行小批次按样本数加权的均值；reward来自更新前新采样的环境，不是每个epoch产生一次。epoch重复优化同一批数据，不能将重复epoch当成独立奖励样本。固定开发集的return_per_episode更适合观察策略性能；episode原始回报另存，截断片段不冒充完整episode。结果图放results/<运行名>/figures/；跨运行图表按实验主题组织并注明输入CSV，检查报告不进results。
 
 当前HPGI：128槽一个episode；每次快层rollout为1024个transition，慢层为256个区间transition（Q4时同为1024槽）；采样后最多遍历2个PPO epoch。epoch不包含新的episode，不是重新采样。配置总量8192预训练槽＋28次慢/快交替＝65536训练槽，校准/验证另计；`--dry-run`零采样显示实际方法的用量。

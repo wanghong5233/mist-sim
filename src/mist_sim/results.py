@@ -28,3 +28,9 @@ def iteration_row(metrics):
     row = {name: metrics[name] for name in names}
     row.update({"energy_" + name: value for name, value in metrics["energy"].items()})
     return row
+
+
+def evaluation_row(metrics):
+    row = {name: value for name, value in metrics.items() if name != "energy"}
+    row.update({"energy_" + name: value for name, value in metrics["energy"].items()})
+    return row

@@ -68,6 +68,15 @@ def test_tensorboard_matches_raw_logs_and_does_not_change_learning(config, tmp_p
         assert float(row["loss"]) == pytest.approx(sum(batch["total_loss"] * len(batch["indices"]) for batch in batches) / sum(len(batch["indices"]) for batch in batches))
     with (store.result_path / "validation.csv").open(encoding="utf-8", newline="") as stream:
         assert [float(row["return_per_episode"]) for row in csv.DictReader(stream)] == pytest.approx([event["return_per_episode"] for event in validation])
+    with (store.result_path / "validation_trajectories.csv").open(encoding="utf-8", newline="") as stream:
+        trajectory_rows = list(csv.DictReader(stream))
+    expected_rows = [(record, trajectory) for record in trainer.validation_history for trajectory in record["trajectories"]]
+    assert len(trajectory_rows) == len(expected_rows)
+    for row, (record, trajectory) in zip(trajectory_rows, expected_rows):
+        assert row["stage"] == record["stage"]
+        assert int(row["trajectory_seed"]) == trajectory["seed"]
+        assert int(row["arrivals"]) == trajectory["metrics"]["arrivals"]
+        assert float(row["conservative_cost"]) == pytest.approx(trajectory["metrics"]["conservative_cost"])
     result_manifest = json.loads((store.result_path / "manifest.json").read_text(encoding="utf-8"))
     for name, digest in result_manifest["artifacts"].items():
         assert digest_file(store.result_path / name) == digest

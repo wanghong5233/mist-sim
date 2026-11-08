@@ -42,6 +42,20 @@ def test_results_are_separate_and_preserve_failed_run(tmp_path):
         RunStore(tmp_path, {"profiles": {}}, "train", 7, "result-test")
 
 
+def test_diagnostic_event_cannot_create_result_tables(tmp_path):
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "fixture"\n', encoding="utf-8")
+    store = RunStore(tmp_path, {"profiles": {}, "monitoring": {"console": False, "tensorboard": False}},
+                     "check", 7, "diagnostic-only")
+    store.event("episode_completed", total_slots=1, raw_return=-2)
+    assert not store.result_path.exists()
+    with pytest.raises(ValueError):
+        store.append_result("../escaped.csv", {"value": 1})
+    assert not store.result_path.exists()
+    store.record_episode(total_slots=1, raw_return=-2)
+    assert (store.result_path / "episodes.csv").is_file()
+    store.finish()
+
+
 @pytest.mark.parametrize("fail", [False, True])
 def test_validation_workspace_cleans_success_and_failure(fail):
     directory = None

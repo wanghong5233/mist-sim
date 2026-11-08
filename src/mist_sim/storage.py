@@ -118,17 +118,27 @@ class RunStore:
 
     def append_result(self, name, row):
         from .results import append_csv
+        if Path(name).name != name or not name.endswith(".csv"):
+            raise ValueError("Result tables must be CSV filenames within the run result directory")
         append_csv(self.result_path / name, dict(run_id=self.manifest["run_id"], seed=self.manifest["seed"], **row))
+
+    def record_episode(self, **fields):
+        self.append_result("episodes.csv", fields)
+        self.event("episode_completed", **fields)
+
+    def record_validation(self, **fields):
+        self.append_result("validation.csv", fields)
+        self.event("validation_completed", **fields)
+
+    def record_evaluation(self, metrics, **identity):
+        from .results import evaluation_row
+        self.append_result("evaluation.csv", dict(identity, **evaluation_row(metrics)))
 
     def event(self, event, **fields):
         from .monitoring import TrainingMonitor, format_event
         if event in ("training_started", "phase_started") and self.monitor is None:
             self.monitor = TrainingMonitor(self.path / "tensorboard", self.monitoring["tensorboard"])
         record = dict(event=event, elapsed_seconds=time.perf_counter() - self.started, **fields)
-        if event == "episode_completed":
-            self.append_result("episodes.csv", fields)
-        elif event == "validation_completed":
-            self.append_result("validation.csv", fields)
         line = json.dumps(record, ensure_ascii=False, allow_nan=False)
         with (self.path / "progress.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(line + "\n")

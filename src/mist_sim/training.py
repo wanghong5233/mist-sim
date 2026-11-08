@@ -91,7 +91,13 @@ class Trainer:
 
     def event(self, event, **fields):
         if self.store:
-            self.store.event(event, **({"total_slots": self.total_slots} | fields))
+            values = {"total_slots": self.total_slots} | fields
+            if event == "episode_completed":
+                self.store.record_episode(**values)
+            elif event == "validation_completed":
+                self.store.record_validation(**values)
+            else:
+                self.store.event(event, **values)
 
     def fresh_environment(self):
         trace_seed = self.seed + 10000 * self.trace_counter
@@ -391,6 +397,11 @@ class Trainer:
         if self.store:
             self.store.write_json(f"traces/validation/{stage}.json", records)
             self.store.write_json("validation_history.json", self.validation_history)
+            from .results import evaluation_row
+            for trajectory in per_trajectory:
+                self.store.append_result("validation_trajectories.csv", dict(
+                    iteration=len(self.history), stage=stage, total_slots=self.total_slots,
+                    trajectory_seed=trajectory["seed"], **evaluation_row(trajectory["metrics"])))
             if improved:
                 self.save(self.best_checkpoint_path)
                 self.save(self.store.path / "checkpoints" / "best.pt")
