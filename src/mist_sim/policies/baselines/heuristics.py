@@ -5,9 +5,10 @@ from ...environment import PublicProblem
 def greedy_fast(problem):
     actions = [0] * len(problem.choices)
     usage = problem.empty_usage()
+    current_cost = problem.scheduling_cost(actions)
     for index, options in enumerate(problem.choices):
         legal = problem.mask(options, usage)
-        best_action, best_cost = 0, problem.scheduling_cost(actions)
+        best_action, best_cost = 0, current_cost
         for action in range(1, len(options)):
             if not legal[action]:
                 continue
@@ -17,6 +18,7 @@ def greedy_fast(problem):
             if cost < best_cost - 1e-12:
                 best_action, best_cost = action, cost
         actions[index] = best_action
+        current_cost = best_cost
         problem.reserve(options[best_action], usage)
     return actions, None, None
 

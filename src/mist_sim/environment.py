@@ -67,6 +67,7 @@ def candidates(config, profiles, request, ready):
                             local_work=local["local_work"], fixed_energy=local_energy,
                             delay_fixed=local_delay,
                             cost_fixed=local_energy + config["lambda_time"] * weight * local_delay))
+    split_profiles = {}
     for server_index, server in enumerate(config["servers"]):
         if not ready[server_index] or request["model"] not in server["models"]:
             continue
@@ -82,7 +83,9 @@ def candidates(config, profiles, request, ready):
         if config["method"] == "fixed_split" or config.get("dynamic_split") is False:
             splits = [fixed_split_for(config, request["model"])]
         for split in splits:
-            profile = profiles.bound(request["model"], request["size"], split, mode)
+            if split not in split_profiles:
+                split_profiles[split] = profiles.bound(request["model"], request["size"], split, mode)
+            profile = split_profiles[split]
             delay = overhead + profile["local_work"] / config["local_rate"] + profile["bits"] / rate + config["backhaul_seconds"]
             slack = deadline - delay
             if slack <= 0:
@@ -143,7 +146,7 @@ class PublicProblem:
         for index, (options, action) in enumerate(zip(self.choices, actions)):
             if not isinstance(action, (int, np.integer)) or not 0 <= action < len(options):
                 raise ValueError("Invalid action index")
-            if not self.mask(options, usage)[action]:
+            if not self.mask([options[action]], usage)[0]:
                 if not allow_projection:
                     raise ValueError("Joint capacity violation")
                 violations.append({"request": index, "reason": "joint_capacity", "action": int(action)})
@@ -151,9 +154,15 @@ class PublicProblem:
             executed.append(int(action))
             self.reserve(options[action], usage)
         rates = np.zeros(len(actions))
+        assignments = [[] for _ in self.config["servers"]]
+        for index, action in enumerate(executed):
+            choice = self.choices[index][action]
+            if choice["kind"] == "edge":
+                assignments[choice["server"]].append(index)
         for server_index, server in enumerate(self.config["servers"]):
-            indices = [index for index, action in enumerate(executed)
-                       if self.choices[index][action]["server"] == server_index]
+            indices = assignments[server_index]
+            if not indices:
+                continue
             selected = [self.choices[index][executed[index]] for index in indices]
             minimum = [choice["minimum"] for choice in selected]
             if predicted is None:
