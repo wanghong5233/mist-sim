@@ -18,6 +18,7 @@ from .config import validate, layer_settings
 from .storage import digest_file
 from .checkpoints import trim_snapshots
 from .rewards import training_reward, RunningRewardNormalizer
+from .schedule import TrainingLimit, rollout_slots, describe_schedule
 
 CHECKPOINT_SCHEMA = 2
 
@@ -80,14 +81,17 @@ class Trainer:
         self.best_stage = None
         self.best_checkpoint_path = None
         self.deadline = None
+        self.max_slots = None
+        self.epoch_counts = {"upper": 0, "lower": 0}
+        self.training_episodes = 0
 
     def check_budget(self):
         if self.deadline is not None and time.perf_counter() >= self.deadline:
-            raise TimeoutError("Training wall-time limit reached; resume from the last completed checkpoint")
+            raise TrainingLimit("wall_time_limit")
 
     def event(self, event, **fields):
         if self.store:
-            self.store.event(event, total_slots=self.total_slots, **fields)
+            self.store.event(event, **({"total_slots": self.total_slots} | fields))
 
     def fresh_environment(self):
         trace_seed = self.seed + 10000 * self.trace_counter
@@ -96,7 +100,7 @@ class Trainer:
         self.trace_counter += 1
         trace = generate_trace(self.config, trace_seed)
         if self.store:
-            self.store.write_json(f"traces/input_{self.trace_counter:05d}.json", {"seed": trace_seed, "trace": trace})
+            self.store.write_json(f"traces/inputs/input_{self.trace_counter:05d}.json", {"seed": trace_seed, "trace": trace})
         return Environment(self.config, trace)
 
     def validation_seeds(self):
@@ -163,9 +167,11 @@ class Trainer:
                     raise RuntimeError("No learned upper policy")
                 interval_records = []
                 for _ in range(min(self.config["window"], self.config["horizon"] - environment.slot)):
+                    self.check_budget()
                     problem = environment.begin_slot(active)
                     actions, predicted, _ = self.controller.fast(problem)
                     interval_records.append(environment.execute(actions, predicted))
+                    self.total_slots += 1
                 duration = len(interval_records)
                 reward = sum(self.config["ppo"]["gamma"] ** offset * training_reward(record, units)
                              for offset, record in enumerate(interval_records))
@@ -185,6 +191,7 @@ class Trainer:
                 if sample is None:
                     raise RuntimeError("No learned lower policy")
                 record = environment.execute(actions, predicted)
+                self.total_slots += 1
                 records.append(record)
                 if environment.done:
                     next_frame, next_value = None, 0.0
@@ -203,15 +210,26 @@ class Trainer:
             buffer.samples[-1]["reward_clip"] = units["clip"]
             buffer.samples[-1]["episode_id"] = episode_id
             buffer.samples[-1]["slot"] = start_slot
+            if environment.done:
+                self.training_episodes += 1
+                episode_metrics = summarize(environment.records)
+                self.event("episode_completed", layer=layer, episode_id=episode_id,
+                           episode_count=self.training_episodes, length=len(environment.records),
+                           raw_return=sum(record["reward"] for record in environment.records),
+                           energy=episode_metrics["total_energy"], on_time_rate=episode_metrics["on_time_rate"])
             if len(buffer.samples) % 64 == 0:
                 self.event("collect", layer=layer, samples=len(buffer.samples), target_samples=count,
                            collected_slots=len(records))
-        self.total_slots += len(records)
         return buffer, records
 
     def phase(self, name, layer, count, pretrain=False):
         if self.phase_in_progress:
             raise RuntimeError("Recover from a completed-stage checkpoint after an interrupted phase")
+        if self.max_slots is not None and self.total_slots + rollout_slots(self.config, layer, count) > self.max_slots:
+            raise TrainingLimit("interaction_limit_before_next_rollout")
+        self.check_budget()
+        if self.store:
+            self.save(self.store.path / "checkpoints" / "last.pt")
         self.phase_in_progress = True
         opponent = "lower" if layer == "upper" else "upper"
         frozen = getattr(self.controller, opponent)
@@ -230,10 +248,10 @@ class Trainer:
             input_diagnostics = policy_input_diagnostics(policy, buffer.samples)
             rollout = rollout_diagnostics(buffer, layer_settings(self.config, layer))
             if self.store:
-                self.store.write_json(f"traces/{name}_behavior.json", buffer.samples)
-                self.store.write_json(f"traces/{name}_inputs.json", input_diagnostics)
-                self.store.write_json(f"traces/{name}_rollout.json", rollout)
-            self.event("rollout_ready", stage=name, rollout=rollout)
+                self.store.write_json(f"traces/phases/{name}/behavior.json", buffer.samples)
+                self.store.write_json(f"traces/phases/{name}/inputs.json", input_diagnostics)
+                self.store.write_json(f"traces/phases/{name}/rollout.json", rollout)
+            self.event("rollout_ready", stage=name, layer=layer, rollout=rollout)
             with torch.no_grad():
                 differences = [abs(float(policy.replay(sample)[0]) - sample["logprob"]) for sample in buffer.samples]
             if max(differences, default=0) > 1e-5:
@@ -241,11 +259,14 @@ class Trainer:
             audit = {}
             update_started = time.perf_counter()
             self.event("update_started", stage=name, samples=len(buffer.samples))
+            def report_epoch(summary):
+                self.epoch_counts[layer] += 1
+                self.event("ppo_epoch", stage=name, layer=layer, layer_epoch=self.epoch_counts[layer], **summary)
             diagnostics = update(policy, self.optimizers[layer], buffer, layer_settings(self.config, layer),
-                                 self.versions[layer], self.versions[opponent], audit, self.check_budget)
+                                 self.versions[layer], self.versions[opponent], audit, self.check_budget, report_epoch)
             updated = time.perf_counter()
             if self.store:
-                self.store.write_json(f"traces/{name}_update.json", audit)
+                self.store.write_json(f"traces/phases/{name}/update.json", audit)
             self.versions[layer] += 1
             if state_hash(frozen) != frozen_before:
                 raise AssertionError("Frozen opponent changed")
@@ -272,7 +293,7 @@ class Trainer:
         self.reward_normalizer.observe(records)
         self.phase_in_progress = False
         if self.store:
-            self.store.write_json(f"traces/{name}.json", records)
+            self.store.write_json(f"traces/phases/{name}/physical.json", records)
             self.store.append_metrics(metrics)
             self.save(self.store.path / "checkpoints" / "last.pt")
             policy = self.config.get("checkpoint_policy", {"stage_interval": 0, "keep_stages": 2})
@@ -283,10 +304,20 @@ class Trainer:
         self.event("phase_completed", stage=name, layer=layer, service=metrics["on_time_rate"],
                    energy=metrics["total_energy"], cost=metrics["conservative_cost"],
                    joint_kl=metrics["post_update_joint_kl"], frozen_unchanged=True,
+                   raw_reward_per_slot=sum(record["reward"] for record in records) / len(records),
+                   training_reward_mean=metrics["training_reward_mean"], explained_variance=metrics["explained_variance"],
+                   reward_scale=units["scale"], reward_clipped_slots=metrics["reward_clipped_slots"],
                    collection_seconds=metrics["collection_seconds"], update_seconds=metrics["update_seconds"])
         return metrics
 
-    def run(self, extra_cycles=0, max_seconds=None):
+    def run(self, extra_cycles=0, max_seconds=None, max_slots=None):
+        stopping = self.config.get("stopping", {})
+        max_seconds = max_seconds if max_seconds is not None else stopping.get("max_seconds")
+        max_slots = max_slots if max_slots is not None else stopping.get("max_slots")
+        if max_slots is not None and (type(max_slots) is not int or max_slots <= 0):
+            raise ValueError("max_slots must be a positive integer")
+        self.max_slots = max_slots
+        self.deadline = None
         if max_seconds is not None:
             if not np.isfinite(max_seconds) or max_seconds <= 0:
                 raise ValueError("Training wall-time limit must be positive and finite")
@@ -295,6 +326,10 @@ class Trainer:
             raise ValueError("extra_cycles must be a nonnegative integer")
         if not (self.controller.learn_lower or self.controller.learn_upper):
             raise ValueError("Heuristic baseline uses evaluate, not train")
+        self.event("training_started", schedule=describe_schedule(self.config, extra_cycles),
+                   resumed_stages=len(self.completed_stages), max_seconds=max_seconds, max_slots=max_slots)
+        if self.store:
+            self.save(self.store.path / "checkpoints" / "last.pt")
         self.calibrate()
         self.event("calibration_completed", episodes=self.config["training"]["calibration_episodes"])
         if self.store and not self.completed_stages:
@@ -325,10 +360,11 @@ class Trainer:
                 self.validate_cycle(validation_stage)
         records, metrics, per_trajectory = self.evaluate_validation()
         if self.store:
-            self.store.write_json("traces/validation.json", records)
+            self.store.write_json("traces/validation/final.json", records)
             self.store.write_json("validation_metrics.json", metrics)
             self.store.write_json("validation_trajectories.json", per_trajectory)
             self.save(self.store.path / "checkpoints" / "final.pt")
+        self.event("training_completed", reason="configured_cycles_completed")
         return self.history
 
     def validate_cycle(self, stage):
@@ -350,7 +386,7 @@ class Trainer:
             self.best_checkpoint_path = str((self.store.path / "checkpoints" / f"selected_{stage}.pt").resolve()) if self.store else None
         self.validation_history.append(record)
         if self.store:
-            self.store.write_json(f"traces/{stage}_validation.json", records)
+            self.store.write_json(f"traces/validation/{stage}.json", records)
             self.store.write_json("validation_history.json", self.validation_history)
             if improved:
                 self.save(self.best_checkpoint_path)
@@ -372,6 +408,9 @@ class Trainer:
             self.save(self.store.path / "checkpoints" / "last.pt")
         self.event("validation_completed", stage=stage, service=metrics["on_time_rate"],
                    cost=metrics["conservative_cost"], eligible=service_ok, selected=improved,
+                   cost_per_slot=metrics["conservative_cost"] / len(records),
+                   return_per_episode=sum(record["reward"] for record in records) / len(per_trajectory),
+                   energy_per_slot=metrics["total_energy"] / len(records),
                    validation_seconds=record["measured_seconds"])
 
     def save(self, path):
@@ -386,6 +425,7 @@ class Trainer:
                    "versions": self.versions, "trace_counter": self.trace_counter,
                    "completed_stages": self.completed_stages, "history": self.history,
                    "total_slots": self.total_slots, "calibrated": self.calibrated,
+                   "epoch_counts": self.epoch_counts, "training_episodes": self.training_episodes,
                    "validation_history": self.validation_history, "best_validation_cost": self.best_validation_cost,
                    "best_stage": self.best_stage, "best_checkpoint_path": self.best_checkpoint_path,
                    "rng": {"python": random.getstate(), "numpy": np.random.get_state(), "torch": torch.get_rng_state()}}
@@ -411,7 +451,7 @@ class Trainer:
         trainer.value_reward_scales = payload["value_reward_scales"]
         for key, optimizer in trainer.optimizers.items():
             optimizer.load_state_dict(payload["optimizers"][key])
-        for key in ("versions", "trace_counter", "completed_stages", "history", "total_slots", "calibrated",
+        for key in ("versions", "trace_counter", "completed_stages", "history", "total_slots", "calibrated", "epoch_counts", "training_episodes",
                     "validation_history", "best_validation_cost", "best_stage", "best_checkpoint_path"):
             setattr(trainer, key, payload[key])
         random.setstate(payload["rng"]["python"])

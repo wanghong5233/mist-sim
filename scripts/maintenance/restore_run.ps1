@@ -2,7 +2,7 @@ param([Parameter(Mandatory=$true)][string]$RunId)
 $ErrorActionPreference = 'Stop'
 if ($RunId -notmatch '^(?:[A-Za-z0-9_-]+__)?\d{8}T\d{6}_[0-9a-f]{10}$') { throw 'Invalid run ID' }
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../..')).Path
-$row = @(Import-Csv -LiteralPath (Join-Path $projectRoot 'results/run_archives.csv') | Where-Object run_id -eq $RunId)
+$row = @(Import-Csv -LiteralPath (Join-Path $projectRoot 'results/maintenance/run_archives.csv') | Where-Object run_id -eq $RunId)
 if ($row.Count -ne 1) { throw 'Archive record not unique' }
 $archive = Join-Path $projectRoot "archives/runs/$RunId.zip"
 $destination = Join-Path $projectRoot "runs/$RunId"

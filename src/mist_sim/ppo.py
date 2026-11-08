@@ -1,6 +1,7 @@
 """PPO joint-action clipped loss; general math independently implemented."""
 import numpy as np
 import torch
+import time
 
 
 def clip_policy_gradients(policy, limit):
@@ -30,7 +31,7 @@ def loss_terms(logprob, old, advantage, values, target, entropy, actor_valid, co
     return total, actor_loss, value_loss, entropy_bonus, ratio, logratio
 
 
-def update(policy, optimizer, buffer, config, behavior_version, opponent_version, audit=None, check_budget=None):
+def update(policy, optimizer, buffer, config, behavior_version, opponent_version, audit=None, check_budget=None, on_epoch=None):
     buffer.consume(behavior_version, opponent_version)
     if not buffer.samples:
         raise ValueError("Empty rollout")
@@ -49,6 +50,8 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
     if not sample_count:
         raise ValueError("Empty rollout")
     for epoch in range(config["epochs"]):
+        epoch_started = time.perf_counter()
+        epoch_offset = len(diagnostics)
         permutation = torch.randperm(sample_count).tolist()
         for offset in range(0, sample_count, config["minibatch"]):
             if check_budget is not None:
@@ -83,7 +86,7 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
             optimizer.step()
             with torch.no_grad():
                 kl = (torch.expm1(logratio) - logratio).mean()
-                diagnostics.append({"epoch": epoch, "loss": float(loss), "actor_loss": float(actor_loss),
+                diagnostics.append({"epoch": epoch, "batch_size": len(indices), "loss": float(loss), "actor_loss": float(actor_loss),
                                     "value_loss": float(value_loss), "entropy": float(entropy_loss),
                                     "joint_kl": float(kl), "clip_fraction": float(((ratio - 1).abs() > config["clip"]).float().mean()),
                                     "gradient_norm": float(gradient), **gradient_groups})
@@ -97,13 +100,22 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
         if audit is not None:
             audit["epoch_checks"].append({"epoch": epoch, "post_update_joint_kl": post_kl,
                                           "early_stop": post_kl > config["target_kl"]})
+        if on_epoch is not None:
+            epoch_rows = diagnostics[epoch_offset:]
+            weights = [row["batch_size"] for row in epoch_rows]
+            summary = {key: float(np.average([row[key] for row in epoch_rows], weights=weights))
+                       for key in epoch_rows[0] if key not in ("epoch", "batch_size")}
+            on_epoch(dict(summary, epoch=epoch + 1, epoch_limit=config["epochs"], minibatches=len(epoch_rows),
+                          post_update_joint_kl=post_kl, early_stop=post_kl > config["target_kl"],
+                          seconds=time.perf_counter() - epoch_started))
         if post_kl > config["target_kl"]:
             break
     with torch.no_grad():
         final_values = np.array([float(policy.value(sample["frame"])) for sample in buffer.samples])
     variance = float(np.var(returns))
     explained = None if variance <= 1e-12 else float(1 - np.var(returns - final_values) / variance)
-    output = {key: float(np.mean([item[key] for item in diagnostics])) for key in diagnostics[0] if key != "epoch"}
+    output = {key: float(np.average([item[key] for item in diagnostics], weights=[item["batch_size"] for item in diagnostics]))
+              for key in diagnostics[0] if key not in ("epoch", "batch_size")}
     output.update(samples=sample_count, optimizer_steps=len(diagnostics), explained_variance=explained,
                   post_update_joint_kl=post_kl, gradient_after_clip_max=max(
                       [item["gradient_after_clip"] for item in audit["minibatches"]]) if audit else clipped_gradient,
@@ -116,6 +128,9 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
         changes[group] += float((parameter.detach() - initial_parameters[name]).double().square().sum())
     output["parameter_delta_l2"] = {name: value ** .5 for name, value in changes.items()}
     output["training_reward_range"] = [min(sample["reward"] for sample in buffer.samples), max(sample["reward"] for sample in buffer.samples)]
+    output["training_reward_mean"] = float(np.mean([sample["reward"] for sample in buffer.samples]))
+    output["epochs_completed"] = epoch + 1
+    output["epoch_stop_reason"] = "target_kl" if post_kl > config["target_kl"] else "epoch_limit"
     output["return_range"] = [float(returns.min()), float(returns.max())]
     output["advantage_range"] = [float(raw_advantages.min()), float(raw_advantages.max())]
     output["normalized_advantage"] = {"mean": float(advantages.mean()), "std": float(advantages.std()),

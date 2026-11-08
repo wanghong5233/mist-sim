@@ -12,6 +12,7 @@ from .policies.hpgi import Controller
 from .reference_solvers import enumerate_slot, enumerate_trajectory
 from .storage import RunStore, write_json, digest_file, validation_workspace
 from .training import Trainer
+from .schedule import TrainingLimit, describe_schedule
 
 
 def main(argv=None):
@@ -33,12 +34,22 @@ def main(argv=None):
     parser.add_argument("--output-dir", type=Path, help="Explicit run output directory; source root stays unchanged")
     parser.add_argument("--extra-cycles", type=int, default=0)
     parser.add_argument("--max-seconds", type=float, help="Training wall-time limit, including calibration and validation")
+    parser.add_argument("--max-slots", type=int, help="Cumulative training-slot cap, checked before each complete rollout")
+    parser.add_argument("--dry-run", action="store_true", help="Show training counts without sampling or creating a run")
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--max-nodes", type=int, default=10000)
     parser.add_argument("--timeout", type=float, default=5)
     parser.add_argument("--measured-latency", action="store_true")
     args = parser.parse_args(argv)
     args.invocation = " ".join(sys.argv if argv is None else argv)
+    if (args.dry_run or args.max_slots is not None or args.max_seconds is not None) and args.command != "train":
+        parser.error("--dry-run/--max-slots/--max-seconds require train")
+    if args.extra_cycles < 0 or (args.max_slots is not None and args.max_slots <= 0):
+        parser.error("extra-cycles must be nonnegative; max-slots must be positive")
+    if args.max_seconds is not None:
+        import math
+        if not math.isfinite(args.max_seconds) or args.max_seconds <= 0:
+            parser.error("max-seconds must be positive and finite")
     if args.trace and args.command not in ("check", "evaluate", "reference"):
         raise ValueError("--trace is only supported by check/evaluate/reference; training uses configured seeded generation")
     if args.checkpoint and (args.overlay or args.overrides) and not args.config:
@@ -67,6 +78,20 @@ def execute(args):
         config = load_config(args.config or args.root / "configs" / "smoke.json", args.overlay, args.overrides)
         config = for_method(config, args.method or config["method"])
         trainer = None
+    if args.dry_run:
+        if config["method"] == "greedy_consolidation":
+            raise ValueError("Heuristic baseline uses evaluate, not train")
+        finished = sum(item["stage"].startswith("cycle_") for item in trainer.validation_history) if trainer else 0
+        extra = max(config["training"]["cycles"], finished) + args.extra_cycles - config["training"]["cycles"]
+        schedule = describe_schedule(config, extra)
+        schedule["stopping"] = dict(config["stopping"])
+        for name in ("max_slots", "max_seconds"):
+            if getattr(args, name) is not None:
+                schedule["stopping"][name] = getattr(args, name)
+        schedule["completed_training_slots"] = trainer.total_slots if trainer else 0
+        schedule["remaining_training_slots"] = schedule["planned_training_slots"] - schedule["completed_training_slots"]
+        print(json.dumps(schedule, ensure_ascii=False, indent=2))
+        return schedule
     if config["fixture_kind"] == "synthetic_hand_calculation" and args.output_dir is None:
         with validation_workspace() as workspace:
             args.output_dir = workspace / "runs"
@@ -87,8 +112,9 @@ def run_command(args, config, trainer):
         if args.checkpoint:
             store.manifest["checkpoint"] = {"path": str(args.checkpoint.resolve()), "sha256": digest_file(args.checkpoint)}
         if args.command == "train":
-            store.manifest["budget"] = {"purpose": "policy_training", "wall_seconds_limit": args.max_seconds,
-                                        "convergence_required": False}
+            store.manifest["budget"] = {"purpose": "policy_training",
+                "wall_seconds_limit": args.max_seconds if args.max_seconds is not None else config["stopping"]["max_seconds"],
+                "training_slots_limit": args.max_slots if args.max_slots is not None else config["stopping"]["max_slots"]}
             store.write_json("manifest.json", store.manifest)
             if trainer is None:
                 trainer = Trainer(config, seed, store)
@@ -96,8 +122,9 @@ def run_command(args, config, trainer):
                 if args.seed is not None and args.seed != trainer.seed:
                     raise ValueError("Resume seed cannot change")
                 trainer.store = store
-            trainer.run(args.extra_cycles, max_seconds=args.max_seconds)
-            store.write_json("summary.json", {"stages": trainer.completed_stages, "total_slots": trainer.total_slots})
+            trainer.run(args.extra_cycles, max_seconds=args.max_seconds, max_slots=args.max_slots)
+            store.write_json("summary.json", {"stages": trainer.completed_stages, "total_slots": trainer.total_slots,
+                                              "stop_reason": "configured_cycles_completed"})
         elif args.command in ("replay", "summarize"):
             if not args.records:
                 raise ValueError("--records required")
@@ -128,6 +155,16 @@ def run_command(args, config, trainer):
                 if args.command == "check":
                     replay(config, records)
         store.finish()
+    except TrainingLimit as error:
+        trainer.event("training_stopped", reason=error.reason)
+        if trainer.phase_in_progress:
+            trainer.save(store.path / "checkpoints" / "interrupted.pt")
+        checkpoint = store.path / "checkpoints" / "last.pt"
+        saved = torch.load(checkpoint, map_location="cpu", weights_only=False)
+        store.write_json("summary.json", {"stages": trainer.completed_stages, "total_slots": trainer.total_slots,
+            "stop_reason": error.reason, "resume_checkpoint": str(checkpoint),
+            "resume_slots": saved["total_slots"], "discarded_incomplete_phase_slots": trainer.total_slots - saved["total_slots"]})
+        store.finish(stopped=error.reason)
     except BaseException as error:
         if trainer is not None:
             trainer.save(store.path / "checkpoints" / "failed_last.pt")

@@ -20,6 +20,22 @@ def digest_file(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def phase_trace_path(run, stage, kind):
+    nested = Path(run) / "traces" / "phases" / stage / (kind + ".json")
+    if nested.exists():
+        return nested
+    suffix = "" if kind == "physical" else "_" + kind
+    return Path(run) / "traces" / (stage + suffix + ".json")
+
+
+def validation_trace_path(run, stage):
+    nested = Path(run) / "traces" / "validation" / (stage + ".json")
+    if nested.exists():
+        return nested
+    name = "validation.json" if stage == "final" else stage + "_validation.json"
+    return Path(run) / "traces" / name
+
+
 def write_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -71,12 +87,14 @@ class RunStore:
         self.path = (Path(output_dir).resolve() if output_dir is not None else self.root / "runs") / identifier
         self.path.mkdir(parents=True, exist_ok=False)
         self.started = time.perf_counter()
+        self.monitor = None
+        self.monitoring = config.get("monitoring", {"tensorboard": False, "console": True})
         self.manifest = {"run_id": identifier, "command": command, "seed": seed,
                          "started_utc": datetime.now(timezone.utc).isoformat(), "status": "running",
                          "source": source_identity(self.root), "device": "cpu",
                          "dependencies": {"python": platform.python_version(), "numpy": np.__version__,
                                           "scipy": scipy.__version__, "torch": torch.__version__},
-                         "budget": "Short correctness run only; no convergence criterion"}
+                         "budget": None}
         self.write_json("resolved_config.json", config)
         self.manifest["config_sha256"] = digest_file(self.path / "resolved_config.json")
         self.manifest["input_profile_sha256"] = hashlib.sha256(json.dumps(config["profiles"], sort_keys=True).encode()).hexdigest()
@@ -94,18 +112,30 @@ class RunStore:
             stream.write(json.dumps({"stage": metrics["stage"], "samples": metrics["samples"], "total_slots": metrics["total_slots"]}) + "\n")
 
     def event(self, event, **fields):
+        from .monitoring import TrainingMonitor, format_event
+        if event in ("training_started", "phase_started") and self.monitor is None:
+            self.monitor = TrainingMonitor(self.path / "tensorboard", self.monitoring["tensorboard"])
         record = dict(event=event, elapsed_seconds=time.perf_counter() - self.started, **fields)
         line = json.dumps(record, ensure_ascii=False, allow_nan=False)
         with (self.path / "progress.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(line + "\n")
-        with (self.path / "stdout.log").open("a", encoding="utf-8") as stream:
-            stream.write(line + "\n")
-        print(line, flush=True)
+        message = format_event(event, fields)
+        if message:
+            with (self.path / "stdout.log").open("a", encoding="utf-8") as stream:
+                stream.write(message + "\n")
+            if self.monitoring["console"]:
+                print(message, flush=True)
+        if self.monitor is not None:
+            self.monitor.record(event, fields)
 
-    def finish(self, error=None):
-        self.manifest.update(status="failed" if error else "completed", exit_code=1 if error else 0,
+    def finish(self, error=None, stopped=None):
+        if self.monitor is not None:
+            self.monitor.close()
+        self.manifest.update(status="failed" if error else "stopped" if stopped else "completed", exit_code=1 if error else 0,
                              finished_utc=datetime.now(timezone.utc).isoformat(),
                              measured_wall_seconds=time.perf_counter() - self.started)
+        if stopped:
+            self.manifest["stop_reason"] = stopped
         if error:
             (self.path / "stderr.log").write_text("".join(traceback.format_exception(type(error), error, error.__traceback__)), encoding="utf-8")
         self.manifest["artifacts"] = {str(path.relative_to(self.path)): digest_file(path)

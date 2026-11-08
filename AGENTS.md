@@ -18,7 +18,7 @@
 |README|入口、目录与可执行命令；替换过期状态，不写执行沿革|
 |IMPLEMENTATION|唯一当前实现规格；按主题修订，删除重复/失效叙述，链接详细源码|
 |configs、data/SCENARIO|实际参数及来源；说明测量/文献/条件假设|
-|results/CODE_REVIEW及JSON|当前检查范围、可追溯证据与未解决问题；历史数字不冒充当前核验|
+|results/validation/CODE_REVIEW及分类JSON|当前检查范围、可追溯证据与未解决问题；历史数字不冒充当前核验|
 |SETUP|本对话简短SOP阶段/输入/产物/核验/后续条件；不复制规格全文|
 |项目PLAN|唯一编号待办和验收链接；不扩成日志|
 

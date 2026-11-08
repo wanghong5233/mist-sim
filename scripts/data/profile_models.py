@@ -61,7 +61,7 @@ def main():
         store.write_json("summary.json", {"models_completed": completed, "prepare_only": args.prepare_only,
                                           "measurement_wall_seconds": time.perf_counter() - computation_started})
         store.finish()
-        write_json(root / "results/profiling_run.json", {"run_id": store.path.name, "prepare_only": args.prepare_only,
+        write_json(root / "results/profiling/profiling_run.json", {"run_id": store.path.name, "prepare_only": args.prepare_only,
                                                         "manifest_sha256": digest_file(store.path / "manifest.json")})
         print(f"FINISHED {store.path}", flush=True)
     except BaseException as error:

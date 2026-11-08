@@ -20,4 +20,6 @@
 |maintenance/|catalog_runs.py|只读运行资产盘点|
 |maintenance/|archive_runs.ps1、restore_run.ps1|既有历史资产工具，按明确任务使用，不是测试产物默认流程|
 
-测试产物默认临时目录、退出删除；需要保留排障原始文件时显式指定新目录。正式结果保留成功和失败。不创建空plots目录；有绘图入口时再增加。当前规格替换维护，脚本迁移历史和旧命令由Git保留。
+持久输出统一放results子目录：data导出写profiling，正确性摘要写validation，开发诊断写diagnostics，仓库/运行清单写maintenance。临时验证套件内部的工作文件随临时目录删除，不复制到工程results顶层。
+
+训练用量预览用`python -m mist_sim train --config configs/conditional.json --dry-run`；TensorBoard与停止/恢复命令在README维护。测试产物默认临时目录、退出删除；需要保留排障原始文件时显式指定新目录。正式结果保留成功和失败。不创建空plots目录；有绘图入口时再增加。

@@ -8,10 +8,10 @@ from pathlib import Path
 def main():
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=root / "results/run_catalog.csv")
+    parser.add_argument("--output", type=Path, default=root / "results/maintenance/run_catalog.csv")
     args = parser.parse_args()
     rows = []
-    for directory in sorted((root / "runs").iterdir()):
+    for directory in sorted((root / "runs").glob("*")):
         if not directory.is_dir():
             continue
         manifest_path = directory / "manifest.json"

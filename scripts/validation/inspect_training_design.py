@@ -128,7 +128,7 @@ def main():
     started = time.perf_counter()
     report["corrected_calibration"] = check_calibration(config, args.run)
     report["corrected_calibration_seconds"] = time.perf_counter() - started
-    write_json(Path("results/training_design_check.json"), report)
+    write_json(Path("results/diagnostics/training_design_check.json"), report)
     print(json.dumps(dict(reward_units=report["config_reward_units"], network=report["network"],
                          witnesses=report["same_trace_witnesses"], seconds=report["measured_seconds"]), indent=2))
 

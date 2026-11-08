@@ -66,11 +66,13 @@ PPO的critic目标是**GAE lambda-return `A+V_old`**，不是完整Monte Carlo�
 
 `configs/environments/`管场景，`configs/algorithms/`管采样、网络及优化，顶层JSON组合二者。overlay/--set严格校验键；`ppo_layers.upper/lower`可覆盖宽度、学习率等，gamma共用。12条validation是可改的开发样本量，不是batch或论文固定值；min_service_rate=null，选中最低验证成本不代表服务要求满足。
 
-检查点保存优化器、统计、随机状态、阶段及源码/输入签名。完成阶段last可续训；中断阶段failed_last只诊断。新增源码不强行加载旧签名权重。正式runs保存原始证据；正确性测试默认临时运行，退出清理。
+检查点保存优化器、统计、随机状态、阶段、累计物理槽/epoch/完成episode及源码/输入签名。完成阶段last可续训；interrupted/failed_last若包含未完成阶段则只供诊断。槽上限在完整rollout前检查；时间上限在物理槽/优化器小批次边界检查，可能包含当前操作耗时的超出量。stopped与数值错误failed分开；恢复重复的未完成阶段交互单列。新增源码不强行加载旧签名权重。
 
 ## 定位问题与外部参考
 
-先看resolved_config和progress阶段；`*_rollout.json`给出样本/物理槽/episode/小批次数及代表transition，`*_behavior.json`保存完整观测/前缀/掩码，`*_inputs.json`给出输入与网络诊断，`*_update.json`保存TD/GAE/loss/梯度。`inspect_logs.py`独立复算；`check_rollouts.py`只采样核验。正常logprob比=1、梯度有限并不证明收敛。
+先看resolved_config和progress阶段；`traces/phases/<阶段>/`内rollout.json给出样本/物理槽/episode/小批次数及代表transition，behavior.json保存完整观测/前缀/掩码，inputs.json给出输入与网络诊断，update.json保存TD/GAE/loss/梯度，physical.json保存执行。`inspect_logs.py`兼容新旧目录并独立复算；`check_rollouts.py`只采样核验。
+
+每个epoch的loss/熵/clip等按实际小批样本数加权，尾批不与满批等权；KL另在epoch后以全部rollout重算。终端逐epoch输出，TensorBoard记录上下层累计epoch轴以及训练/验证物理槽轴，关闭writer后才计算文件哈希。原始episode回报和固定验证回报不受归一化尺度影响；训练奖励/尺度/裁剪次数另列。具体命令、停止开关和目录说明只在README维护。
 
 - [CleanRL PPO](https://github.com/vwxyzjn/cleanrl/blob/fe8d8a03c41a7ef5b523e2e354bd01c363e786bb/cleanrl/ppo.py)：fe8d8a03c41a7ef5b523e2e354bd01c363e786bb，MIT；正交初始化、Adam、GAE、clip/KL/梯度经验参考，没有复制源码文件。
 - [SB3](https://github.com/DLR-RM/stable-baselines3/tree/0cdcd200deef06b9ad0af72f6ddfb07c06c6df39)：MIT；终止/截断、种子与评价核对。[MaskablePPO](https://github.com/Stable-Baselines-Team/stable-baselines3-contrib/tree/a8af63682070df0bda9707400b2e971055600910)：MIT；掩码语义核对，不调用其learn。

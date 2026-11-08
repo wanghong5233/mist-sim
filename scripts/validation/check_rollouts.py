@@ -47,7 +47,7 @@ def main():
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=root / "configs/conditional.json")
-    parser.add_argument("--summary", type=Path, default=root / "results/rollout_check.json")
+    parser.add_argument("--summary", type=Path, default=root / "results/validation/rollout_check.json")
     args = parser.parse_args()
     started = time.perf_counter()
     config = load_config(args.config)

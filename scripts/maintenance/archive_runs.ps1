@@ -5,7 +5,7 @@ $runsRoot = (Resolve-Path -LiteralPath (Join-Path $projectRoot 'runs')).Path
 $archivesRoot = Join-Path $projectRoot 'archives/runs'
 $pattern = '(?:[A-Za-z0-9_-]+__)?\d{8}T\d{6}_[0-9a-f]{10}'
 $protected = [System.Collections.Generic.HashSet[string]]::new()
-Get-ChildItem -LiteralPath (Join-Path $projectRoot 'results') -Filter '*.json' -File | ForEach-Object {
+Get-ChildItem -LiteralPath (Join-Path $projectRoot 'results') -Filter '*.json' -File -Recurse | ForEach-Object {
     foreach ($match in [regex]::Matches([IO.File]::ReadAllText($_.FullName), $pattern)) { [void]$protected.Add($match.Value) }
 }
 $visited = [System.Collections.Generic.HashSet[string]]::new()
@@ -37,7 +37,8 @@ Write-Output "Protected IDs: $($protected.Count); archive candidates: $($candida
 if (-not $Apply) { $candidates | Select-Object Name; return }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Directory]::CreateDirectory($archivesRoot) | Out-Null
-$reportPath = Join-Path $projectRoot 'results/run_archives.csv'
+$reportPath = Join-Path $projectRoot 'results/maintenance/run_archives.csv'
+[IO.Directory]::CreateDirectory((Split-Path -Parent $reportPath)) | Out-Null
 $rows = @()
 if (Test-Path -LiteralPath $reportPath) { $rows = @(Import-Csv -LiteralPath $reportPath) }
 foreach ($candidate in $candidates) {

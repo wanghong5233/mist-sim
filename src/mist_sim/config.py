@@ -61,6 +61,8 @@ def load_config(path, overlays=(), overrides=()):
     config["validation"].setdefault("trajectories", 1)
     config.setdefault("checkpoint_policy", {"stage_interval": 0, "keep_stages": 2})
     config.setdefault("reward_normalization", {"enabled": False, "max_abs_slot_reward": 10.0})
+    config.setdefault("monitoring", {"tensorboard": False, "console": True})
+    config.setdefault("stopping", {"max_slots": None, "max_seconds": None})
     for overlay in overlays:
         values = json.loads(Path(overlay).read_text(encoding="utf-8"))
         config = merge_config(config, values)
@@ -117,9 +119,19 @@ def validate(config):
                "control_seconds", "backhaul_seconds", "lambda_time", "rejection_cost", "capacity_mask",
                "learned_rates", "fixed_split", "long_term_feedback", "dynamic_split", "initial_active",
                "history_slots", "servers", "access_points", "units", "profiles", "ppo", "ppo_layers",
-               "training", "seeds", "device", "validation", "checkpoint_policy", "reward_normalization"}
+               "training", "seeds", "device", "validation", "checkpoint_policy", "reward_normalization", "monitoring", "stopping"}
     if set(config) - allowed:
         raise ValueError(f"Unknown configuration keys: {set(config) - allowed}")
+    monitoring = config.get("monitoring", {"tensorboard": False, "console": True})
+    if set(monitoring) != {"tensorboard", "console"} or any(type(value) is not bool for value in monitoring.values()):
+        raise ValueError("Invalid monitoring settings")
+    stopping = config.get("stopping", {"max_slots": None, "max_seconds": None})
+    if set(stopping) != {"max_slots", "max_seconds"}:
+        raise ValueError("Invalid stopping settings")
+    if stopping["max_slots"] is not None and (type(stopping["max_slots"]) is not int or stopping["max_slots"] < 1):
+        raise ValueError("max_slots must be a positive integer or null")
+    if stopping["max_seconds"] is not None and (type(stopping["max_seconds"]) not in (int, float) or stopping["max_seconds"] <= 0):
+        raise ValueError("max_seconds must be positive or null")
     policy = config.get("checkpoint_policy", {"stage_interval": 0, "keep_stages": 2})
     if set(policy) != {"stage_interval", "keep_stages"} or any(type(value) is not int or value < 0 for value in policy.values()):
         raise ValueError("Invalid checkpoint retention policy")

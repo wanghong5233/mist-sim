@@ -256,15 +256,17 @@ def inspect_run(path):
     path = Path(path)
     config = json.loads((path / "resolved_config.json").read_text(encoding="utf-8"))
     result = {"run_id": path.name, "updates": [], "physics": []}
-    for update_path in sorted((path / "traces").glob("*_update.json")):
-        stem = update_path.name.removesuffix("_update.json")
-        samples = json.loads((path / "traces" / (stem + "_behavior.json")).read_text(encoding="utf-8"))
+    from .storage import phase_trace_path
+    updates = list((path / "traces").glob("*_update.json")) + list((path / "traces/phases").glob("*/update.json"))
+    for update_path in sorted(updates):
+        stem = update_path.parent.name if update_path.name == "update.json" else update_path.name.removesuffix("_update.json")
+        samples = json.loads(phase_trace_path(path, stem, "behavior").read_text(encoding="utf-8"))
         audit = json.loads(update_path.read_text(encoding="utf-8"))
         result["updates"].append(dict(stage=stem, **check_update(samples, audit)))
-    for records_path in sorted((path / "traces").glob("*.json")):
+    for records_path in sorted((path / "traces").rglob("*.json")):
         if records_path.name.endswith(("_behavior.json", "_update.json")) or records_path.name.startswith("input_"):
             continue
         records = json.loads(records_path.read_text(encoding="utf-8"))
         if isinstance(records, list) and records and isinstance(records[0], dict) and "tasks" in records[0]:
-            result["physics"].append(dict(file=records_path.name, **check_physics(config, records)))
+            result["physics"].append(dict(file=records_path.relative_to(path).as_posix(), **check_physics(config, records)))
     return result

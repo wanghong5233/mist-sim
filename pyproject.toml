@@ -10,7 +10,8 @@ requires-python = ">=3.10"
 dependencies = ["numpy>=1.24", "scipy>=1.10", "torch>=2.2"]
 
 [project.optional-dependencies]
-test = ["pytest>=7"]
+test = ["pytest>=7", "tensorboard>=2.14"]
+monitoring = ["tensorboard>=2.14"]
 profiling = ["torchvision>=0.17", "Pillow>=9"]
 
 [project.scripts]

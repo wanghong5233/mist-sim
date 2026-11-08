@@ -29,7 +29,7 @@ mist-sim/
 ├── scripts/       data/数据处理，validation/核验，maintenance/维护
 ├── data/          raw/共享原始输入，processed/可复用剖面
 ├── runs/          正式执行的原始轨迹、配置、日志和检查点
-├── results/       可追溯的轻量摘要、正式图表及汇总
+├── results/       profiling/剖面、validation/核验、diagnostics/诊断、maintenance/维护
 └── references/    只读上游参考，不是运行依赖
 ```
 
@@ -43,7 +43,7 @@ mist-sim/
 & D:/Anaconda/envs/pytorch/python.exe scripts/maintenance/check_environment.py
 ```
 
-确认executable及package_path。后续命令同样使用该绝对解释器；其他机器先按pyproject安装依赖及`pip install --no-deps -e .`。PPO默认CPU；离线测量可用GPU。仿真只查数值剖面，不加载三个视觉模型，不需训练视觉网络。
+确认executable及package_path。后续命令同样使用该绝对解释器；其他机器安装`pip install -e ".[monitoring]"`，开发测试用`".[test]"`。本机TensorBoard已安装。PPO默认CPU；离线测量可用GPU。仿真只查数值剖面，不加载三个视觉模型，不需训练视觉网络。
 
 普通安装同样支持：从克隆的mist-sim根目录运行，CLI优先使用当前工程配置；从其他目录运行时显式传`--root 工程路径`。验证套件从工程根运行，不假定机器上存在论文目录。
 
@@ -74,8 +74,9 @@ mist-sim/
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim check --config configs/smoke.json
 & D:/Anaconda/envs/pytorch/python.exe scripts/maintenance/check_publish.py
 & D:/Anaconda/envs/pytorch/python.exe scripts/validation/check_rollouts.py
-& D:/Anaconda/envs/pytorch/python.exe -m mist_sim.verification --summary results/rl_chain_check.json
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim.verification --summary results/validation/rl_chain_check.json
 & D:/Anaconda/envs/pytorch/python.exe scripts/validation/check_profile_chain.py
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method hpgi --dry-run
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method hpgi --seed 4200001
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim evaluate --checkpoint runs/<训练ID>/checkpoints/final.pt --seed 4400019
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim replay --checkpoint runs/<训练ID>/checkpoints/final.pt --records runs/<评价ID>/traces/evaluation.json
@@ -87,8 +88,20 @@ mist-sim/
 
 ## 日志与资产
 
-每个正式run用用途-方法-seed命名，加后缀防覆盖；resolved_config及manifest记录实际配置、源码/输入哈希、种子、设备、耗时、退出状态。progress记录阶段与rollout摘要；metrics记录物理指标/PPO诊断；validation_history和selection记录验证及选模。`*_behavior/rollout/inputs/update.json`含可复算的关键链路数据，具体语义见IMPLEMENTATION。
+每个正式run用用途-方法-seed命名，加后缀防覆盖；resolved_config及manifest记录配置、源码/输入哈希、种子、耗时和状态。progress.jsonl保存完整事件；stdout.log和终端逐epoch显示actor/value loss、熵、KL、clip fraction及耗时；metrics.jsonl保存阶段物理指标。原始数据按`traces/inputs/`、`traces/phases/<阶段>/`、`traces/validation/`分组；阶段内behavior/rollout/inputs/update/physical.json分别对应行为、样本摘要、输入诊断、更新及执行。旧格式保持只读兼容。
 
-检查点保存网络、优化器、统计、随机状态及完成阶段。默认initial/last/final/best/selected，阶段快照关闭；显式开启须设上限。best为开发选择，final为最终状态；没有服务阈值时不能称best满足论文业务要求。failed_last只诊断，正常恢复用last/initial。
+当前HPGI：128槽一个episode；每次快层rollout为1024个transition，慢层为256个区间transition（Q4时同为1024槽）；采样后最多遍历2个PPO epoch。epoch不包含新的episode，不是重新采样。配置总量8192预训练槽＋28次慢/快交替＝65536训练槽，校准/验证另计；`--dry-run`零采样显示实际方法的用量。
 
-完整验证套件默认临时空间，退出删除原始轨迹与权重；仅显式`--keep-artifacts tmp/debug-example`保留排障资料。汇总只保留必要证据，不复制全部原始日志到文档。未运行收敛实验，任何测试数值都不得进入论文性能表。
+conditional配置默认启用TensorBoard，合成测试默认关闭。打开曲线：
+
+```powershell
+& D:/Anaconda/envs/pytorch/python.exe -m tensorboard.main --logdir runs --host 127.0.0.1 --port 6006
+```
+
+浏览器访问http://127.0.0.1:6006。`ppo/upper|lower`横轴为该层累计epoch，`train/*`和`validation/*`横轴为累计训练物理槽。重点看固定验证输入的原始回报、成本与服务率，再用loss/KL/熵/梯度排障；PPO loss不要求单调下降。训练奖励尺度变化单独记录，不与原始回报混用。
+
+正常停止由training.cycles决定；可用`--max-slots N`（含恢复前累计槽）或`--max-seconds S`（本次运行含校准/验证的墙钟）设上限，也可写入stopping配置。交互上限在完整rollout前检查，剩余额度不足就停止；时间上限在槽/小批次边界检查，不是进程硬杀。预算停止标记stopped并给出last.pt恢复位置；阶段中断额外保存interrupted.pt，恢复从上一完整阶段重做并明确记录被丢弃交互。KL>.03只提前结束本次PPO更新；非有限损失/梯度等错误标记failed。没有凭空添加奖励或服务率早停阈值。
+
+检查点保存网络、优化器、统计、随机状态、epoch计数及完成阶段。默认initial/last/final/best/selected，阶段快照关闭；显式开启须设上限。best为开发选择，final为最终状态；没有服务阈值时不能称best满足论文业务要求。正常恢复用last/initial。
+
+完整验证套件默认临时空间，退出删除原始轨迹与权重；仅显式`--keep-artifacts tmp/debug-example`保留排障资料。results按用途替换当前摘要，不按日期/轮次堆副本；生成脚本默认写入对应子目录。正式图表按实验问题建主题目录，记录来源run和生成命令；测试数值不进入论文性能表。

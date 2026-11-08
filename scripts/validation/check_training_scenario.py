@@ -12,7 +12,7 @@ def main():
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("configs/conditional.json"))
-    parser.add_argument("--output", type=Path, default=Path("results/hpgi_preflight.json"))
+    parser.add_argument("--output", type=Path, default=Path("results/diagnostics/hpgi_preflight.json"))
     args = parser.parse_args()
     config = load_config(args.config)
     seeds = [config["seeds"]["validation"] + 10000 * index for index in range(config["validation"]["trajectories"])]

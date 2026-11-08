@@ -18,7 +18,7 @@ def main():
     selection.add_argument("--verify-saved", action="store_true")
     args = parser.parse_args()
     if args.verify_saved:
-        index = json.loads((root / "results/data_index.json").read_text(encoding="utf-8"))
+        index = json.loads((root / "results/profiling/data_index.json").read_text(encoding="utf-8"))
         for label in ("processed", "summary", "observations"):
             if digest_file(root / index[label + "_path"]) != index[label + "_sha256"]:
                 raise AssertionError(f"Changed exported asset: {label}")
@@ -45,7 +45,8 @@ def main():
     components, rows, checks = export_profiles(records, run_id)
     output = root / "data/processed" / ("dnn_profiles_" + run_id + ".json")
     write_json(output, components)
-    table = root / "results/dnn_profile_summary.csv"
+    table = root / "results/profiling/dnn_profile_summary.csv"
+    table.parent.mkdir(parents=True, exist_ok=True)
     with table.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
         writer.writeheader()
@@ -56,7 +57,7 @@ def main():
             for split in device["splits"]:
                 split.pop("prefix_graph", None)
                 split.pop("suffix_graph", None)
-    observations = root / "results/profile_observations.json"
+    observations = root / "results/profiling/profile_observations.json"
     write_json(observations, records)
     index = {"source_run": run_id, "run_path": run.relative_to(root).as_posix(), "source_commit": manifest["source"]["commit"],
              "export_source": source_identity(root),
@@ -74,7 +75,7 @@ def main():
              "verify_without_hardware_or_original_assets": "python scripts/data/export_profiles.py --verify-saved",
              "remeasure": ["python scripts/data/profile_models.py", "python scripts/data/export_profiles.py --run runs/<new_run_id>"],
              "reproduction_note": "Structural values and outputs are reproducible; timings/memory are device/runtime dependent, not bitwise targets"}
-    write_json(root / "results/data_index.json", index)
+    write_json(root / "results/profiling/data_index.json", index)
     print(json.dumps({"processed": str(output), **checks, "training_ready": False}, ensure_ascii=False, indent=2))
 
 

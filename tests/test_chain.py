@@ -199,9 +199,9 @@ def test_update_logs_forward_gae_physics_and_tampering(config, tmp_path):
         trainer.calibrate()
         for stage, layer, count in (("upper_check", "upper", 3), ("lower_check", "lower", 7)):
             trainer.phase(stage, layer, count)
-            samples = json.loads((store.path / "traces" / (stage + "_behavior.json")).read_text(encoding="utf-8"))
-            audit = json.loads((store.path / "traces" / (stage + "_update.json")).read_text(encoding="utf-8"))
-            records = json.loads((store.path / "traces" / (stage + ".json")).read_text(encoding="utf-8"))
+            samples = json.loads((store.path / "traces/phases" / stage / "behavior.json").read_text(encoding="utf-8"))
+            audit = json.loads((store.path / "traces/phases" / stage / "update.json").read_text(encoding="utf-8"))
+            records = json.loads((store.path / "traces/phases" / stage / "physical.json").read_text(encoding="utf-8"))
             check_update(samples, audit)
             check_physics(config, records)
             audit["minibatches"][0]["total_loss"] += 10

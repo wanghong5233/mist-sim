@@ -9,7 +9,7 @@ from mist_sim.config import load_config
 from mist_sim.diagnostics import inspect_run
 from mist_sim.evaluation import replay, summarize, evaluate, assert_close
 from mist_sim.anonymity import generate_trace
-from mist_sim.storage import digest_file, write_json
+from mist_sim.storage import digest_file, write_json, phase_trace_path, validation_trace_path
 from mist_sim.training import Trainer
 from mist_sim.ppo import loss_terms
 
@@ -22,11 +22,11 @@ def initial_gradient_balance(run):
     trainer = Trainer.load(run / "checkpoints" / "initial.pt")
     results = {}
     for stage, layer in (("pretrain", "lower"), ("cycle_000_upper", "upper")):
-        update_path = run / "traces" / (stage + "_update.json")
+        update_path = phase_trace_path(run, stage, "update")
         if not update_path.exists():
             continue
         audit = read_json(update_path)
-        samples = read_json(run / "traces" / (stage + "_behavior.json"))
+        samples = read_json(phase_trace_path(run, stage, "behavior"))
         indices = audit["minibatches"][0]["indices"]
         policy = getattr(trainer.controller, layer)
         replayed = [policy.replay(samples[index]) for index in indices]
@@ -58,7 +58,7 @@ def main():
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", type=Path, required=True)
-    parser.add_argument("--output", type=Path, default=Path("results/hpgi_probe_summary.json"))
+    parser.add_argument("--output", type=Path, default=Path("results/diagnostics/hpgi_probe_summary.json"))
     args = parser.parse_args()
     started = time.perf_counter()
     manifest = read_json(args.run / "manifest.json")
@@ -72,18 +72,18 @@ def main():
     gradient_balance = initial_gradient_balance(args.run)
     history = [json.loads(line) for line in (args.run / "metrics.jsonl").read_text(encoding="utf-8").splitlines()]
     for row in history:
-        records = read_json(args.run / "traces" / (row["stage"] + ".json"))
+        records = read_json(phase_trace_path(args.run, row["stage"], "physical"))
         for key, value in summarize(records).items():
             assert_close(value, row[key], key)
     validation = read_json(args.run / "validation_history.json")
     for row in validation:
-        records = read_json(args.run / "traces" / (row["stage"] + "_validation.json"))
+        records = read_json(validation_trace_path(args.run, row["stage"]))
         assert_close(replay(config, records), row["metrics"])
     checkpoint = args.run / "checkpoints" / ("final.pt" if manifest["status"] == "completed" else "last.pt")
     trainer = Trainer.load(checkpoint)
     reload_equal = None
     if manifest["status"] == "completed":
-        original = read_json(args.run / "traces" / "validation.json")[:config["horizon"]]
+        original = read_json(validation_trace_path(args.run, "final"))[:config["horizon"]]
         restored, _ = evaluate(trainer.controller, config, generate_trace(config, config["seeds"]["validation"]))
         for expected, actual in zip(original, restored):
             for key in ("active", "actions", "rates", "energy", "cost"):
