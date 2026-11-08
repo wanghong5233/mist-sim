@@ -56,7 +56,7 @@ PPO的critic目标是**GAE lambda-return `A+V_old`**，不是完整Monte Carlo�
 |交替快层|1024个快层transition|1024槽/8条|每epoch16批，最多80步|
 |交替慢层|256个区间transition|1024槽/8条|每epoch4批，最多20步|
 
-预训练总量8192按fast_slots分块，最后一块允许不足1024；块后更新再重新采样，恢复跳过完成块。之后28次慢/快交替，HPGI合计65536训练槽，校准/验证另计。保留128槽episode与每rollout八条完整轨迹：GAE有效记忆约20快槽/80慢层物理槽，128槽已覆盖多次Q4控制及唤醒；当前没有证据需缩短episode，缩短还会改变有限时域目标。只将PPO epoch由2增为5，上层每轮梯度步8→20、下层32→80，保留KL=.03保护、64宽、学习率和奖励。早停预热32768槽对应完成12个交替轮，耐心8轮，双模式评价避免argmax平台单独触发；这些仍是工程试运行值。相邻样本相关，不能当独立样本；预训练一大块8192只更新一次的旧节奏已替换。
+预训练总量8192按fast_slots分块，最后一块允许不足1024；块后更新再重新采样，恢复跳过完成块。之后28次慢/快交替，HPGI合计65536训练槽，校准/验证另计。保留128槽episode与每rollout八条完整轨迹：GAE有效记忆约20快槽/80慢层物理槽，128槽已覆盖多次Q4控制及唤醒；当前没有证据需缩短episode，缩短还会改变有限时域目标。只将PPO epoch由2增为5，上层每轮梯度步8→20、下层32→80，保留KL=.03保护、64宽、学习率和奖励。训练按配置完成全部交替轮次，无连续无改善早停；验证曲线仅监测，不自动判定收敛。需要稳定后的更多曲线点可追加实际训练轮次。相邻样本相关，不能当独立样本；预训练一大块8192只更新一次的旧节奏已替换。
 
 17槽episode的慢层持续长度为4/4/4/4/1。真实终止不bootstrap；采样截断使用正确下一观测和价值，GAE不跨重置。新collect从新episode开始，截断后未采样的后缀不补造。若horizon/Q/方法改变，物理交互预算必须重新核算：Q1、Always-On、仅慢层学习不能凭相同cycles宣称公平。
 
@@ -84,7 +84,7 @@ PPO更新通过`policies/batching.py`执行真正的小批张量前向/反向：
 
 `runtime.torch_threads`可配置CPU算子线程数，默认1；小网络串行采样与批量更新对线程数的收益不同，需按整条链路实测，不能用线程数推断并行效率。`scripts/validation/benchmark_batching.py`默认使用合成变长输入，也可传--behavior读取已有轨迹，只测量不写结果或更新权重。
 
-终端按完整交替轮次显示Iteration及三个步骤：服务器PPO、调度PPO、联合评价。采样、epoch和评价轨迹进度使用tqdm临时单行，结束清除；非交互输出省略进度条。每轮摘要记录联合评价原始平均episode回报、成本/时隙、按时率及两个组件各自的样本加权平均loss，不把两层loss合成整体目标。详细逐epoch诊断仍写stdout.log、progress.jsonl和TensorBoard；关闭writer后才计算文件哈希。CSV的iteration字段保留组件更新计数，新validation.csv显式增加cycle_index表示完整轮次；确定性与固定种子概率采样reward分列，两者都停滞才累计早停耐心，不改写历史结果。原始episode回报和固定验证回报不受归一化尺度影响；训练奖励/尺度/裁剪次数另列。具体命令、停止开关和目录说明只在README维护。
+终端按完整交替轮次显示Iteration及三个步骤：服务器PPO、调度PPO、联合评价。采样、epoch和评价轨迹进度使用tqdm临时单行，结束清除；非交互输出省略进度条。每轮摘要记录联合评价原始平均episode回报、成本/时隙、按时率及两个组件各自的样本加权平均loss，不把两层loss合成整体目标。详细逐epoch诊断仍写stdout.log、progress.jsonl和TensorBoard；关闭writer后才计算文件哈希。CSV的iteration字段保留组件更新计数，新validation.csv显式增加cycle_index表示完整轮次；确定性与固定种子概率采样reward分列，两者仅用于监测与分析，不触发停止，不改写历史结果。原始episode回报和固定验证回报不受归一化尺度影响；训练奖励/尺度/裁剪次数另列。具体命令、停止开关和目录说明只在README维护。
 
 - [CleanRL PPO](https://github.com/vwxyzjn/cleanrl/blob/fe8d8a03c41a7ef5b523e2e354bd01c363e786bb/cleanrl/ppo.py)：fe8d8a03c41a7ef5b523e2e354bd01c363e786bb，MIT；正交初始化、Adam、GAE、clip/KL/梯度经验参考，没有复制源码文件。
 - [SB3](https://github.com/DLR-RM/stable-baselines3/tree/0cdcd200deef06b9ad0af72f6ddfb07c06c6df39)：MIT；终止/截断、种子与评价核对。[MaskablePPO](https://github.com/Stable-Baselines-Team/stable-baselines3-contrib/tree/a8af63682070df0bda9707400b2e971055600910)：MIT；掩码语义核对，不调用其learn。

@@ -16,6 +16,5 @@
   "validation": {"min_service_rate": null, "selection": "best_feasible_cost", "trajectories": 12, "sampled": true},
   "reward_normalization": {"enabled": true, "max_abs_slot_reward": 10.0},
   "monitoring": {"tensorboard": true, "console": true},
-  "stopping": {"max_slots": null, "max_seconds": null,
-    "plateau": {"enabled": true, "patience": 8, "min_slots": 32768, "min_relative_improvement": 0.001}}
+  "stopping": {"max_slots": null, "max_seconds": null}
 }

@@ -135,9 +135,9 @@ conditional配置默认启用TensorBoard，合成测试默认关闭。打开曲�
 
 浏览器访问http://127.0.0.1:6006。`ppo/upper|lower`横轴为该层累计epoch，`train/*`和`validation/*`横轴为累计训练物理槽。重点看固定验证输入的原始回报、成本与服务率，再用loss/KL/熵/梯度排障；PPO loss不要求单调下降。训练奖励尺度变化单独记录，不与原始回报混用。
 
-training.cycles是最大轮数；支持验证平台早停和`--max-slots N`/`--max-seconds S`预算上限。conditional默认启用stopping.plateau：min_slots=32768后开始计数，同请求、固定动作种子的概率采样评价与确定性评价分别保存；任一模式成本相对自身参考值改善超过min_relative_improvement=0.001即重置计数，两者连续patience=8次都无有效改善才停止。此为停滞检测，不等于收敛判定。仅完整交替周期的验证计数，初始/预训练不计；首次符合最小训练量的验证建立参考值。以上是可调工程默认值，不是论文参数或数学收敛证明；比较实验应统一早停规则并报告实际交互量。已有服务门槛若不满足则不累计平台次数，没有新增服务阈值。
+training.cycles指定本次完整交替轮数，当前28轮。验证奖励或成本连续不改善不会停止训练，也不自动宣告收敛；每轮原始评价点持续保存，用于观察稳定后的表现。需要更多尾部轮次可通过同版本检查点和--extra-cycles追加，保留原有曲线，不补造数据。
 
-平台停止标记stopped、原因为validation_plateau，保存final.pt/last.pt并保留best.pt与selection.json。耐心计数由检查点内完整验证历史恢复，重启或extra-cycles不会绕过已触发早停；early_stopping.json及progress记录参考成本和计数。关闭该机制用配置stopping.plateau.enabled=false开始新训练。交互上限在完整rollout前检查，时间上限在槽/小批边界检查；中途打断保存interrupted.pt供诊断，续训使用完成阶段last.pt。KL>.03只结束本批PPO更新，非有限损失/梯度标记failed。
+仅保留显式--max-slots N/--max-seconds S预算限制、用户中断与错误退出。交互上限在完整rollout前检查，时间上限在槽/小批边界检查；中途打断保存interrupted.pt供诊断，续训使用完成阶段last.pt。KL>.03只结束本批PPO更新，不结束训练；非有限损失/梯度标记failed。
 
 检查点保存网络、优化器、统计、随机状态、epoch计数及完成阶段。默认initial/last/final/best/selected，阶段快照关闭；显式开启须设上限。best为开发选择，final为最终状态；没有服务阈值时不能称best满足论文业务要求。正常恢复用last/initial。
 

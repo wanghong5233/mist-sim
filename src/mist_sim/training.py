@@ -20,7 +20,7 @@ from .config import validate, layer_settings
 from .storage import digest_file
 from .checkpoints import trim_snapshots
 from .rewards import training_reward, RunningRewardNormalizer
-from .schedule import TrainingLimit, rollout_slots, describe_schedule, plateau_status
+from .schedule import TrainingLimit, rollout_slots, describe_schedule
 
 CHECKPOINT_SCHEMA = 2
 
@@ -374,7 +374,6 @@ class Trainer:
                    resumed_stages=len(self.completed_stages), max_seconds=max_seconds, max_slots=max_slots)
         if self.store:
             self.save(self.store.path / "checkpoints" / "last.pt")
-        self.check_plateau()
         self.calibrate()
         self.event("calibration_completed", episodes=self.config["training"]["calibration_episodes"])
         if self.store and not self.completed_stages:
@@ -403,7 +402,6 @@ class Trainer:
             validation_stage = f"cycle_{cycle:03d}"
             if validation_stage not in [item["stage"] for item in self.validation_history]:
                 self.validate_cycle(validation_stage)
-            self.check_plateau()
         records, metrics, per_trajectory = self.evaluate_validation()
         if self.store:
             self.store.write_json("traces/validation/final.json", records)
@@ -412,19 +410,6 @@ class Trainer:
             self.save(self.store.path / "checkpoints" / "final.pt")
         self.event("training_completed", reason="configured_cycles_completed")
         return self.history
-
-    def check_plateau(self):
-        settings = self.config.get("stopping", {}).get("plateau")
-        if settings is None or not settings["enabled"]:
-            return
-        status = plateau_status(self.validation_history, settings)
-        self.event("plateau_checked", **status)
-        if self.store:
-            self.store.write_json("early_stopping.json", dict(settings=settings, **status))
-        if status["stop"]:
-            if self.store:
-                self.save(self.store.path / "checkpoints" / "final.pt")
-            raise TrainingLimit("validation_plateau")
 
     def validate_cycle(self, stage):
         from .diagnostics import check_physics

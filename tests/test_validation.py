@@ -4,32 +4,8 @@ from pathlib import Path
 import pytest
 
 from mist_sim.cli import main
-from mist_sim.schedule import plateau_status
 from mist_sim.storage import write_json
 from mist_sim.training import Trainer
-
-
-def test_plateau_threshold_and_warmup():
-    settings = dict(enabled=True, patience=2, min_slots=10, min_relative_improvement=.01)
-    history = []
-    for index, (slots, cost) in enumerate(((1, 100), (10, 100), (20, 99.5), (30, 98), (40, 98), (50, 98))):
-        history.append(dict(stage=f"cycle_{index:03d}", total_slots=slots, eligible=True,
-                            metrics={"conservative_cost": cost}))
-        assert plateau_status(history, settings)["stop"] == (index == 5)
-    settings["enabled"] = False
-    assert not plateau_status(history, settings)["stop"]
-
-
-def test_sampled_improvement_prevents_deterministic_plateau_stop():
-    settings = dict(enabled=True, patience=2, min_slots=0, min_relative_improvement=.001)
-    history = []
-    for index, cost in enumerate((100., 95., 90., 90., 90.)):
-        history.append(dict(stage=f"cycle_{index:03d}", total_slots=index * 10, eligible=True,
-                            metrics={"conservative_cost": 100.},
-                            sampled_metrics={"conservative_cost": cost}, sampled_eligible=True))
-        status = plateau_status(history, settings)
-        assert status["stop"] == (index == 4)
-    assert status["monitored_modes"] == "deterministic_and_sampled"
 
 
 def test_sampled_validation_is_repeatable_rng_isolated_and_saved(config, tmp_path):
@@ -80,11 +56,10 @@ def test_five_epoch_update_reports_activation_probabilities(config):
     assert 0 <= probability["min"] <= probability["mean"] <= probability["max"] <= 1
 
 
-def test_cli_stops_and_resume_keeps_patience(config, tmp_path, monkeypatch):
+def test_constant_validation_runs_all_cycles_and_can_extend(config, tmp_path, monkeypatch):
     config["training"].update(pretrain_slots=2, fast_slots=2, slow_intervals=1, cycles=10, calibration_episodes=1)
     config["horizon"] = 4
     config["ppo"]["epochs"] = 1
-    config["stopping"]["plateau"] = dict(enabled=True, patience=2, min_slots=0, min_relative_improvement=.001)
     original = Trainer.evaluate_validation
 
     def constant_validation(self):
@@ -97,18 +72,12 @@ def test_cli_stops_and_resume_keeps_patience(config, tmp_path, monkeypatch):
     write_json(filename, config)
     run = main(["train", "--config", str(filename), "--output-dir", str(tmp_path / "runs")])
     summary = json.loads((run / "summary.json").read_text())
-    assert summary["stop_reason"] == "validation_plateau"
-    assert summary["total_slots"] == 20
+    assert summary["stop_reason"] == "configured_cycles_completed"
+    assert summary["total_slots"] == 62
     assert (run / "checkpoints/final.pt").exists()
     assert (run / "checkpoints/best.pt").exists()
     resumed = main(["train", "--checkpoint", str(run / "checkpoints/last.pt"),
                     "--output-dir", str(tmp_path / "runs"), "--extra-cycles", "10"])
-    assert json.loads((resumed / "summary.json").read_text())["total_slots"] == 20
+    assert json.loads((resumed / "summary.json").read_text())["total_slots"] == 122
 
 
-@pytest.mark.parametrize("key,value", [("patience", 0), ("min_slots", -1), ("min_relative_improvement", 1)])
-def test_invalid_plateau(config, key, value):
-    from mist_sim.config import validate
-    config["stopping"]["plateau"][key] = value
-    with pytest.raises(ValueError, match="plateau"):
-        validate(config)

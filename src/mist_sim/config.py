@@ -64,8 +64,6 @@ def load_config(path, overlays=(), overrides=()):
     config.setdefault("reward_normalization", {"enabled": False, "max_abs_slot_reward": 10.0})
     config.setdefault("monitoring", {"tensorboard": False, "console": True})
     config.setdefault("stopping", {"max_slots": None, "max_seconds": None})
-    config["stopping"].setdefault("plateau", {"enabled": False, "patience": 5,
-        "min_slots": 16384, "min_relative_improvement": 0.001})
     for overlay in overlays:
         values = json.loads(Path(overlay).read_text(encoding="utf-8"))
         config = merge_config(config, values)
@@ -129,17 +127,8 @@ def validate(config):
     if set(monitoring) != {"tensorboard", "console"} or any(type(value) is not bool for value in monitoring.values()):
         raise ValueError("Invalid monitoring settings")
     stopping = config.get("stopping", {"max_slots": None, "max_seconds": None})
-    if set(stopping) - {"max_slots", "max_seconds", "plateau"}:
+    if set(stopping) - {"max_slots", "max_seconds"}:
         raise ValueError("Invalid stopping settings")
-    plateau = stopping.get("plateau")
-    if plateau is not None:
-        if set(plateau) != {"enabled", "patience", "min_slots", "min_relative_improvement"}:
-            raise ValueError("Invalid plateau settings")
-        if (type(plateau["enabled"]) is not bool or type(plateau["patience"]) is not int or plateau["patience"] < 1
-                or type(plateau["min_slots"]) is not int or plateau["min_slots"] < 0
-                or type(plateau["min_relative_improvement"]) not in (int, float)
-                or not 0 <= plateau["min_relative_improvement"] < 1):
-            raise ValueError("Invalid plateau settings")
     if stopping["max_slots"] is not None and (type(stopping["max_slots"]) is not int or stopping["max_slots"] < 1):
         raise ValueError("max_slots must be a positive integer or null")
     if stopping["max_seconds"] is not None and (type(stopping["max_seconds"]) not in (int, float) or stopping["max_seconds"] <= 0):

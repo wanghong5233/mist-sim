@@ -8,39 +8,6 @@ class TrainingLimit(TimeoutError):
         super().__init__(reason)
 
 
-def plateau_status(history, settings):
-    """Reconstruct patience from checkpointed validation history, never training loss."""
-    best, bad, stopped = None, 0, False
-    sampled_best = None
-    for record in history:
-        if not record["stage"].startswith("cycle_") or record["total_slots"] < settings["min_slots"]:
-            continue
-        cost = record["metrics"]["conservative_cost"]
-        if not record["eligible"] or not math.isfinite(cost):
-            best, bad = None, 0
-            continue
-        improved = best is None or best - cost > settings["min_relative_improvement"] * max(abs(best), 1e-12)
-        if improved:
-            best = cost
-        sampled = record.get("sampled_metrics", {}).get("conservative_cost")
-        if sampled is not None:
-            if not math.isfinite(sampled) or not record.get("sampled_eligible", True):
-                bad, sampled_best = 0, None
-                continue
-            if sampled_best is None or sampled_best - sampled > settings["min_relative_improvement"] * max(abs(sampled_best), 1e-12):
-                sampled_best, improved = sampled, True
-        if improved:
-            bad = 0
-        else:
-            bad += 1
-        if settings["enabled"] and bad >= settings["patience"]:
-            stopped = True
-            break
-    return {"stop": stopped, "bad_checks": bad, "reference_cost": best,
-            "sampled_reference_cost": sampled_best,
-            "monitored_modes": "deterministic_and_sampled" if sampled_best is not None else "deterministic"}
-
-
 def rollout_slots(config, layer, count):
     if layer == "lower":
         return count
