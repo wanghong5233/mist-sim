@@ -1,4 +1,5 @@
 {
+  "runtime": {"torch_threads": 1},
   "training": {"pretrain_slots": 256, "fast_slots": 256, "slow_intervals": 64, "cycles": 1},
   "seeds": {"train": 4210002}
 }

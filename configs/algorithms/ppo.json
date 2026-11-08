@@ -1,4 +1,5 @@
 {
+  "runtime": {"torch_threads": 1},
   "method": "hpgi",
   "information": "robust",
   "window": 4,

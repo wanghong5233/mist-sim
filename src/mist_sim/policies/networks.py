@@ -1,5 +1,4 @@
 """Autoregressive set policies with independent actor and critic encoders."""
-import copy
 import numpy as np
 import torch
 from torch import nn
@@ -184,14 +183,16 @@ class SetPolicy(nn.Module):
     @torch.no_grad()
     def upper_action(self, observation, deterministic=False):
         frame = upper_frame(observation)
-        encoding = self.encode(frame)
+        pooled_items, _, context = self.encode(frame)
+        logprob = torch.zeros(())
         actions, steps = [], []
         for index in range(len(observation["active"])):
-            prefix_frame = copy.deepcopy(frame)
+            prefix_frame = dict(frame, servers=[list(row) for row in frame["servers"]])
             for previous_index, enabled in enumerate(actions):
                 prefix_frame["servers"][previous_index][6] = enabled
                 prefix_frame["servers"][previous_index][7] = enabled * observation["active"][previous_index]
-            encoding = self.encode(prefix_frame)
+            servers = torch.tensor(prefix_frame["servers"], dtype=torch.float32)
+            encoding = pooled_items, self.actor_servers(self.server_norm(servers)).mean(0), context
             features = frame["items"][2 * index:2 * index + 2]
             prefix = [index, sum(actions), sum(actions) / max(1, index), 0, 0, 0, 0]
             distribution, _ = self.distribution(encoding, features, prefix, [True, True])
@@ -199,8 +200,9 @@ class SetPolicy(nn.Module):
             steps.append({"features": features, "prefix": prefix, "mask": [True, True], "action": action,
                           "prefix_frame": prefix_frame})
             actions.append(action)
+            logprob = logprob + distribution.log_prob(torch.tensor(action))
         sample = {"frame": frame, "steps": steps, "actions": actions}
-        logprob, _, value = self.replay(sample)
+        value = self.value(frame)
         sample.update(logprob=float(logprob), value=float(value))
         return actions, sample
 
@@ -211,6 +213,7 @@ class SetPolicy(nn.Module):
         usage = problem.empty_usage()
         actions, steps, predicted = [], [], []
         edge_count, local_count = 0, 0
+        logprob = torch.zeros(())
         for index, options in enumerate(problem.choices):
             features = [item_features(choice, problem.config) for choice in options]
             for feature, choice in zip(features, options):
@@ -227,6 +230,7 @@ class SetPolicy(nn.Module):
             distribution, combined = self.distribution(encoding, features, prefix, mask)
             action = int(distribution.probs.argmax() if deterministic else distribution.sample())
             choice = options[action]
+            logprob = logprob + distribution.log_prob(torch.tensor(action))
             step = {"features": features, "prefix": prefix, "mask": mask, "action": action}
             rate = 0.0
             if self.learned_rates and choice["kind"] == "edge":
@@ -234,6 +238,7 @@ class SetPolicy(nn.Module):
                 normal = Normal(mean, self.rate_log_std.exp())
                 latent = mean if deterministic else normal.sample()
                 step["rate_latent"] = float(latent)
+                logprob = logprob + normal.log_prob(latent)
                 rate = float(torch.sigmoid(latent)) * problem.config["servers"][choice["server"]]["capacity"]
             predicted.append(rate)
             actions.append(action)
@@ -243,6 +248,6 @@ class SetPolicy(nn.Module):
             local_count += choice["kind"] == "local"
         sample = {"frame": frame, "steps": steps, "actions": actions,
                   "order": [item["id"] for item in problem.public], "predicted_rates": predicted if self.learned_rates else None}
-        logprob, _, value = self.replay(sample)
+        value = self.value(frame)
         sample.update(logprob=float(logprob), value=float(value))
         return actions, sample["predicted_rates"], sample

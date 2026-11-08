@@ -10,6 +10,7 @@
 |validation/|check_rollouts.py|当前配置快/慢rollout及GAE/概率/物理复算；默认仅打印，--summary可显式导出排障摘要|
 |validation/|check_profile_chain.py|真实剖面的48槽正确性短更新、重载和续训一致性，退出清理原始产物|
 |validation/|inspect_logs.py|复算已有轨迹、PPO及物理中间量|
+|validation/|benchmark_batching.py|串行参照与批量张量前向/反向等价及交错计时；默认合成输入，--behavior可读已有轨迹，仅打印|
 |validation/|report_hpgi_probe.py --run 路径|检查既有训练资产、日志及耗时；不继续训练|
 |validation/|verify_commands.py --workspace 路径|完整验证套件的CLI子检查|
 |validation/|build_verification_index.py --workspace 路径|检查临时套件资产及哈希|

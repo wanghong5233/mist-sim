@@ -14,6 +14,7 @@ from .evaluation import evaluate, summarize
 from .policies.hpgi import Controller
 from .policies.networks import upper_frame, lower_frame
 from .ppo import update
+from .policies.batching import replay_chunks
 from .config import validate, layer_settings
 from .storage import digest_file
 from .checkpoints import trim_snapshots
@@ -61,7 +62,7 @@ class Trainer:
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
-        torch.set_num_threads(1)
+        torch.set_num_threads(config.get("runtime", {}).get("torch_threads", 1))
         self.controller = Controller(config)
         self.reward_normalizer = RunningRewardNormalizer(config)
         self.value_reward_scales = {"upper": None, "lower": None}
@@ -251,15 +252,22 @@ class Trainer:
             buffer, records = self.collect(layer, count, pretrain)
             collected = time.perf_counter()
             from .diagnostics import policy_input_diagnostics, rollout_diagnostics
+            diagnostics_started = time.perf_counter()
             input_diagnostics = policy_input_diagnostics(policy, buffer.samples)
             rollout = rollout_diagnostics(buffer, layer_settings(self.config, layer))
+            diagnostics_seconds = time.perf_counter() - diagnostics_started
+            trace_started = time.perf_counter()
             if self.store:
                 self.store.write_json(f"traces/phases/{name}/behavior.json", buffer.samples)
                 self.store.write_json(f"traces/phases/{name}/inputs.json", input_diagnostics)
                 self.store.write_json(f"traces/phases/{name}/rollout.json", rollout)
             self.event("rollout_ready", stage=name, layer=layer, rollout=rollout)
+            trace_write_seconds = time.perf_counter() - trace_started
+            probability_started = time.perf_counter()
             with torch.no_grad():
-                differences = [abs(float(policy.replay(sample)[0]) - sample["logprob"]) for sample in buffer.samples]
+                differences = (replay_chunks(policy, buffer.samples, layer_settings(self.config, layer)["minibatch"]) -
+                               torch.tensor([sample["logprob"] for sample in buffer.samples])).abs().tolist()
+            probability_check_seconds = time.perf_counter() - probability_started
             if max(differences, default=0) > 1e-5:
                 raise AssertionError("Behavior probability changed before update")
             audit = {}
@@ -291,6 +299,8 @@ class Trainer:
                            "rejection_cost": sum(record["rejection_penalty"] for record in records)},
                        input_diagnostics=input_diagnostics,
                        rollout=rollout,
+                       diagnostics_seconds=diagnostics_seconds, trace_write_seconds=trace_write_seconds,
+                       probability_check_seconds=probability_check_seconds,
                        collection_seconds=collected - started, update_seconds=updated - update_started,
                        phase_seconds=time.perf_counter() - started,
                        local_completed=sum(task["on_time"] and task["action"] == "local" for record in records for task in record["tasks"]),

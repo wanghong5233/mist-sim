@@ -111,8 +111,8 @@ def policy_input_diagnostics(policy, samples, limit=16):
             if isinstance(module, torch.nn.Tanh):
                 handles.append(module.register_forward_hook(hook(name)))
         with torch.no_grad():
-            for sample in selected:
-                policy.replay(sample)
+            from .policies.batching import replay_batch
+            replay_batch(policy, selected)
     finally:
         for handle in handles:
             handle.remove()

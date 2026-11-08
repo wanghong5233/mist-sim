@@ -121,7 +121,7 @@ def validate(config):
                "control_seconds", "backhaul_seconds", "lambda_time", "rejection_cost", "capacity_mask",
                "learned_rates", "fixed_split", "long_term_feedback", "dynamic_split", "initial_active",
                "history_slots", "servers", "access_points", "units", "profiles", "ppo", "ppo_layers",
-               "training", "seeds", "device", "validation", "checkpoint_policy", "reward_normalization", "monitoring", "stopping"}
+               "training", "seeds", "device", "validation", "checkpoint_policy", "reward_normalization", "monitoring", "stopping", "runtime"}
     if set(config) - allowed:
         raise ValueError(f"Unknown configuration keys: {set(config) - allowed}")
     monitoring = config.get("monitoring", {"tensorboard": False, "console": True})
@@ -213,6 +213,9 @@ def validate(config):
             raise ValueError("Fixed split mapping must cover every model")
         if any(fixed_split_for(config, name) not in model["legal_splits"] for name, model in config["profiles"].items()):
             raise ValueError("Fixed split must be legal for every configured model")
+    threads = config.get("runtime", {}).get("torch_threads", 1)
+    if type(threads) is not int or threads < 1:
+        raise ValueError("runtime.torch_threads must be a positive integer")
     if config["ppo"]["epochs"] < 1 or not 0 <= config["ppo"]["gamma"] <= 1:
         raise ValueError("Invalid PPO settings")
     if any(config["training"][key] < 1 for key in ("pretrain_slots", "fast_slots", "slow_intervals", "cycles", "calibration_episodes")):

@@ -72,7 +72,13 @@ PPO的critic目标是**GAE lambda-return `A+V_old`**，不是完整Monte Carlo�
 
 先看resolved_config和progress阶段；`traces/phases/<阶段>/`内rollout.json给出样本/物理槽/episode/小批次数及代表transition，behavior.json保存完整观测/前缀/掩码，inputs.json给出输入与网络诊断，update.json保存TD/GAE/loss/梯度，physical.json保存执行。`inspect_logs.py`兼容新旧目录并独立复算；`check_rollouts.py`只采样核验。
 
-每个epoch的loss/熵/clip等按实际小批样本数加权，尾批不与满批等权；KL另在epoch后以全部rollout重算。终端逐epoch输出，TensorBoard记录上下层累计epoch轴以及训练/验证物理槽轴，关闭writer后才计算文件哈希。原始episode回报和固定验证回报不受归一化尺度影响；训练奖励/尺度/裁剪次数另列。具体命令、停止开关和目录说明只在README维护。
+PPO更新通过`policies/batching.py`执行真正的小批张量前向/反向：变长集合展平编码并按样本分段均值池化，候选分数加掩码后批量计算条件概率，再按原动作前缀汇总联合概率。空任务仅更新critic，Fixed-Window连续速率密度保留。逐样本`replay`仅作独立测试参照。采样仍按环境时间和资源前缀顺序执行，但直接保存当次动作概率，不再重放整批动作；上层前缀共享只读items，只复制发生变化的服务器行。
+
+每个epoch的loss/熵/clip等按实际小批样本数加权，尾批不与满批等权；KL另在epoch后对全部rollout分块批量重算，不计算无用critic。更新前概率复核也走同一批量路径。`metrics.jsonl`单列diagnostics_seconds、trace_write_seconds、probability_check_seconds及update_timings（前向/loss、反向/step、KL），不把阶段剩余时间冒称磁盘写入。轨迹JSON不缩进，完整数值和独立复算接口保持不变。
+
+`runtime.torch_threads`可配置CPU算子线程数，默认1；小网络串行采样与批量更新对线程数的收益不同，需按整条链路实测，不能用线程数推断并行效率。`scripts/validation/benchmark_batching.py`默认使用合成变长输入，也可传--behavior读取已有轨迹，只测量不写结果或更新权重。
+
+终端逐epoch输出，TensorBoard记录上下层累计epoch轴以及训练/验证物理槽轴，关闭writer后才计算文件哈希。原始episode回报和固定验证回报不受归一化尺度影响；训练奖励/尺度/裁剪次数另列。具体命令、停止开关和目录说明只在README维护。
 
 - [CleanRL PPO](https://github.com/vwxyzjn/cleanrl/blob/fe8d8a03c41a7ef5b523e2e354bd01c363e786bb/cleanrl/ppo.py)：fe8d8a03c41a7ef5b523e2e354bd01c363e786bb，MIT；正交初始化、Adam、GAE、clip/KL/梯度经验参考，没有复制源码文件。
 - [SB3](https://github.com/DLR-RM/stable-baselines3/tree/0cdcd200deef06b9ad0af72f6ddfb07c06c6df39)：MIT；终止/截断、种子与评价核对。[MaskablePPO](https://github.com/Stable-Baselines-Team/stable-baselines3-contrib/tree/a8af63682070df0bda9707400b2e971055600910)：MIT；掩码语义核对，不调用其learn。

@@ -2,6 +2,7 @@
 import numpy as np
 import torch
 import time
+from .policies.batching import replay_batch, replay_chunks, values_batch
 
 
 def clip_policy_gradients(policy, limit):
@@ -46,6 +47,7 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
                      td_errors=[sample["reward"] + config["gamma"] ** sample["duration"] * sample["next_value"] *
                                 (not sample["terminated"]) - sample["value"] for sample in buffer.samples])
     diagnostics = []
+    timings = dict(forward_loss_seconds=0.0, backward_step_seconds=0.0, kl_check_seconds=0.0)
     sample_count = len(buffer.samples)
     if not sample_count:
         raise ValueError("Empty rollout")
@@ -57,10 +59,8 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
             if check_budget is not None:
                 check_budget()
             indices = permutation[offset:offset + config["minibatch"]]
-            replayed = [policy.replay(buffer.samples[index]) for index in indices]
-            logprob = torch.stack([item[0] for item in replayed])
-            entropy = torch.stack([item[1] for item in replayed])
-            values = torch.stack([item[2] for item in replayed])
+            forward_started = time.perf_counter()
+            logprob, entropy, values = replay_batch(policy, [buffer.samples[index] for index in indices])
             old = torch.tensor([buffer.samples[index]["logprob"] for index in indices])
             advantage = torch.tensor(advantages[indices], dtype=torch.float32)
             target = torch.tensor(returns[indices], dtype=torch.float32)
@@ -70,6 +70,8 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
             if not torch.isfinite(loss):
                 raise FloatingPointError("Nonfinite PPO loss")
             optimizer.zero_grad()
+            timings["forward_loss_seconds"] += time.perf_counter() - forward_started
+            backward_started = time.perf_counter()
             loss.backward()
             gradient_groups = clip_policy_gradients(policy, config["max_grad_norm"])
             gradient = np.hypot(gradient_groups["actor_before"], gradient_groups["critic_before"])
@@ -84,17 +86,20 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
                     "gradient_before_clip": float(gradient), "gradient_after_clip": clipped_gradient,
                     "gradient_groups": gradient_groups})
             optimizer.step()
+            timings["backward_step_seconds"] += time.perf_counter() - backward_started
             with torch.no_grad():
                 kl = (torch.expm1(logratio) - logratio).mean()
                 diagnostics.append({"epoch": epoch, "batch_size": len(indices), "loss": float(loss), "actor_loss": float(actor_loss),
                                     "value_loss": float(value_loss), "entropy": float(entropy_loss),
                                     "joint_kl": float(kl), "clip_fraction": float(((ratio - 1).abs() > config["clip"]).float().mean()),
                                     "gradient_norm": float(gradient), **gradient_groups})
+        kl_started = time.perf_counter()
         with torch.no_grad():
-            updated_logprob = torch.stack([policy.replay(sample)[0] for sample in buffer.samples])
+            updated_logprob = replay_chunks(policy, buffer.samples, config["minibatch"])
             old_logprob = torch.tensor([sample["logprob"] for sample in buffer.samples])
             joint_logratio = updated_logprob - old_logprob
             post_kl = float((torch.expm1(joint_logratio.double()) - joint_logratio.double()).mean())
+        timings["kl_check_seconds"] += time.perf_counter() - kl_started
         if not np.isfinite(post_kl):
             raise FloatingPointError("Nonfinite post-update KL")
         if audit is not None:
@@ -111,12 +116,14 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
         if post_kl > config["target_kl"]:
             break
     with torch.no_grad():
-        final_values = np.array([float(policy.value(sample["frame"])) for sample in buffer.samples])
+        final_values = torch.cat([values_batch(policy, buffer.samples[start:start + config["minibatch"]])
+                                  for start in range(0, sample_count, config["minibatch"])]).cpu().numpy()
     variance = float(np.var(returns))
     explained = None if variance <= 1e-12 else float(1 - np.var(returns - final_values) / variance)
     output = {key: float(np.average([item[key] for item in diagnostics], weights=[item["batch_size"] for item in diagnostics]))
               for key in diagnostics[0] if key not in ("epoch", "batch_size")}
     output.update(samples=sample_count, optimizer_steps=len(diagnostics), explained_variance=explained,
+                  update_timings=timings,
                   post_update_joint_kl=post_kl, gradient_after_clip_max=max(
                       [item["gradient_after_clip"] for item in audit["minibatches"]]) if audit else clipped_gradient,
                   durations=[sample["duration"] for sample in buffer.samples],
