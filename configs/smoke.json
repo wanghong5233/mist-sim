@@ -1,0 +1,4 @@
+{
+  "environment": "environments/synthetic.json",
+  "algorithm": "algorithms/ppo.json"
+}

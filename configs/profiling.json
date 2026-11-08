@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "models": ["resnet50", "resnet152", "vit_b_32"],
+  "weights": {"resnet50": "IMAGENET1K_V2", "resnet152": "IMAGENET1K_V2", "vit_b_32": "IMAGENET1K_V1"},
+  "boundaries": {"resnet50": ["layer1", "layer2", "layer3", "layer4"], "resnet152": ["layer1", "layer2", "layer3", "layer4"], "vit_b_32": ["encoder_layer_2", "encoder_layer_5", "encoder_layer_8", "encoder_layer_10"]},
+  "dataset": {
+    "name": "CIFAR-10 official Python test batch",
+    "url": "https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz",
+    "download_url": "https://dataset.bj.bcebos.com/cifar/cifar-10-python.tar.gz",
+    "md5": "c58f30108f718f92721af3b95e74349a",
+    "member": "cifar-10-batches-py/test_batch",
+    "calibration_indices": [0, 1, 2, 3, 4, 5, 6, 7],
+    "validation_indices": [100, 101, 102, 103, 104, 105, 106, 107],
+    "purpose": "Timing and split-output equivalence only; resized with official ImageNet weight transforms; no classification accuracy claim",
+    "redistribution": "Original archive/weights not redistributed; use source links and checksum"
+  },
+  "devices": ["cpu", "cuda"],
+  "batch_size": 1,
+  "dtype": "float32",
+  "cpu_threads": 4,
+  "warmup": 5,
+  "calibration_repeats": 24,
+  "validation_repeats": 16,
+  "empirical_bound_margin": 0.1,
+  "equivalence_rtol": 0.0001,
+  "equivalence_atol": 0.00001,
+  "cross_device_rtol": 0.001,
+  "cross_device_atol": 0.0001,
+  "per_model_timeout_seconds": 600,
+  "total_measurement_limit_seconds": 1800,
+  "gpu_allocated_limit_bytes": 6442450944,
+  "seed": 271828
+}

@@ -1,0 +1,5 @@
+/data/processed/dnn_profiles_*.json -text whitespace=cr-at-eol
+/results/data_index.json -text whitespace=cr-at-eol
+/results/dnn_profile_summary.csv -text whitespace=cr-at-eol
+/results/profile_observations.json -text whitespace=cr-at-eol
+/results/profiling_run.json -text whitespace=cr-at-eol

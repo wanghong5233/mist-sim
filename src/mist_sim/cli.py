@@ -1,0 +1,152 @@
+"""Unified commands: check, train, evaluate, replay, summarize, reference."""
+import argparse
+import json
+from pathlib import Path
+import sys
+import torch
+from .config import load_config, for_method, METHODS
+from .anonymity import generate_trace
+from .environment import Environment
+from .evaluation import evaluate, replay, summarize
+from .policies.hpgi import Controller
+from .reference_solvers import enumerate_slot, enumerate_trajectory
+from .storage import RunStore, write_json, digest_file, validation_workspace
+from .training import Trainer
+
+
+def main(argv=None):
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=("check", "train", "evaluate", "replay", "summarize", "reference"))
+    root = Path(__file__).resolve().parents[2]
+    parser.add_argument("--root", type=Path, default=root)
+    parser.add_argument("--config", type=Path)
+    parser.add_argument("--overlay", type=Path, action="append", default=[])
+    parser.add_argument("--set", dest="overrides", action="append", default=[])
+    parser.add_argument("--method", choices=METHODS)
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--checkpoint", type=Path)
+    parser.add_argument("--trace", type=Path)
+    parser.add_argument("--records", type=Path)
+    parser.add_argument("--run-id")
+    parser.add_argument("--output-dir", type=Path, help="Explicit run output directory; source root stays unchanged")
+    parser.add_argument("--extra-cycles", type=int, default=0)
+    parser.add_argument("--max-seconds", type=float, help="Training wall-time limit, including calibration and validation")
+    parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--max-nodes", type=int, default=10000)
+    parser.add_argument("--timeout", type=float, default=5)
+    parser.add_argument("--measured-latency", action="store_true")
+    args = parser.parse_args(argv)
+    args.invocation = " ".join(sys.argv if argv is None else argv)
+    if args.trace and args.command not in ("check", "evaluate", "reference"):
+        raise ValueError("--trace is only supported by check/evaluate/reference; training uses configured seeded generation")
+    if args.checkpoint and (args.overlay or args.overrides) and not args.config:
+        raise ValueError("Checkpoint overrides require explicit --config for compatibility checking")
+    if args.command == "check" and args.output_dir is None:
+        with validation_workspace() as workspace:
+            args.output_dir = workspace / "runs"
+            execute(args)
+        print("Check passed; temporary artifacts removed")
+        return None
+    return execute(args)
+
+
+def execute(args):
+    torch.set_num_threads(1)
+    if args.checkpoint:
+        trainer = Trainer.load(args.checkpoint)
+        config = trainer.config
+        if args.config:
+            config = load_config(args.config, args.overlay, args.overrides)
+            config = for_method(config, args.method or config["method"])
+            trainer = Trainer.load(args.checkpoint, config)
+        elif args.method and args.method != config["method"]:
+            raise ValueError("Cannot relabel checkpoint method")
+    else:
+        config = load_config(args.config or args.root / "configs" / "smoke.json", args.overlay, args.overrides)
+        config = for_method(config, args.method or config["method"])
+        trainer = None
+    if config["fixture_kind"] == "synthetic_hand_calculation" and args.output_dir is None:
+        with validation_workspace() as workspace:
+            args.output_dir = workspace / "runs"
+            run_command(args, config, trainer)
+        print("Synthetic check finished; temporary artifacts removed")
+        return None
+    return run_command(args, config, trainer)
+
+
+def run_command(args, config, trainer):
+    seed = args.seed if args.seed is not None else config["seeds"]["train" if args.command == "train" else "test"]
+    if trainer is not None and args.command == "train" and args.seed is None:
+        seed = trainer.seed
+    if args.extra_cycles < 0:
+        raise ValueError("extra-cycles must be nonnegative")
+    store = RunStore(args.root, config, args.invocation, seed, args.run_id, output_dir=args.output_dir)
+    try:
+        if args.checkpoint:
+            store.manifest["checkpoint"] = {"path": str(args.checkpoint.resolve()), "sha256": digest_file(args.checkpoint)}
+        if args.command == "train":
+            store.manifest["budget"] = {"purpose": "policy_training", "wall_seconds_limit": args.max_seconds,
+                                        "convergence_required": False}
+            store.write_json("manifest.json", store.manifest)
+            if trainer is None:
+                trainer = Trainer(config, seed, store)
+            else:
+                if args.seed is not None and args.seed != trainer.seed:
+                    raise ValueError("Resume seed cannot change")
+                trainer.store = store
+            trainer.run(args.extra_cycles, max_seconds=args.max_seconds)
+            store.write_json("summary.json", {"stages": trainer.completed_stages, "total_slots": trainer.total_slots})
+        elif args.command in ("replay", "summarize"):
+            if not args.records:
+                raise ValueError("--records required")
+            records = json.loads(args.records.read_text(encoding="utf-8"))
+            store.manifest["records_input"] = {"path": str(args.records.resolve()), "sha256": digest_file(args.records)}
+            result = replay(config, records) if args.command == "replay" else summarize(records)
+            store.write_json("summary.json", result)
+        else:
+            trace = json.loads(args.trace.read_text(encoding="utf-8")) if args.trace else generate_trace(config, seed)
+            store.write_json("traces/input.json", trace)
+            if args.command == "reference":
+                if args.offline:
+                    result = enumerate_trajectory(config, trace, args.max_nodes, args.timeout)
+                else:
+                    environment = Environment(config, trace)
+                    problem = environment.begin_slot(config["initial_active"])
+                    result = enumerate_slot(problem, args.max_nodes, args.timeout)
+                store.write_json("reference.json", result)
+            else:
+                if args.command == "evaluate" and trainer is None and config["method"] != "greedy_consolidation":
+                    raise ValueError("Learned methods require their own checkpoint")
+                controller = trainer.controller if trainer else Controller(for_method(config, "greedy_consolidation"))
+                if args.command == "check" and config["learned_rates"] and trainer is None:
+                    controller = KernelCheckController(config)
+                records, metrics = evaluate(controller, config, trace, args.measured_latency)
+                store.write_json("traces/evaluation.json", records)
+                store.write_json("summary.json", metrics)
+                if args.command == "check":
+                    replay(config, records)
+        store.finish()
+    except BaseException as error:
+        if trainer is not None:
+            trainer.save(store.path / "checkpoints" / "failed_last.pt")
+        store.finish(error)
+        raise
+    print(str(store.path))
+    return store.path
+
+
+class KernelCheckController:
+    """Explicit hand-driven kernel check, not an untrained learned baseline."""
+    def __init__(self, config):
+        self.config = config
+
+    def slow(self, observation, deterministic=False):
+        return [1] * len(self.config["servers"]), None
+
+    def fast(self, problem, deterministic=False):
+        from .policies.baselines.heuristics import greedy_fast
+        actions, _, _ = greedy_fast(problem)
+        _, rates, _, _ = problem.allocate(actions)
+        return actions, rates.tolist(), None

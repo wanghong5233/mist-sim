@@ -1,0 +1,166 @@
+{
+  "schema": 1,
+  "fixture_kind": "synthetic_hand_calculation",
+  "source": "Hand-constructed unit-test fixture; not measured DNN or MERA data",
+  "slot_seconds": 1,
+  "horizon": 16,
+  "terminals": 4,
+  "k": 2,
+  "arrival_probability": 0.8,
+  "position_range": [
+    0,
+    2
+  ],
+  "deadline_range": [
+    0.65,
+    1
+  ],
+  "fading_range": [
+    0.9,
+    1.1
+  ],
+  "generalization_divisions": [
+    4,
+    2,
+    1
+  ],
+  "local_rate": 10,
+  "local_kappa": 0.001,
+  "tx_power": 0.1,
+  "noise_density": 1e-8,
+  "interference": 0.00001,
+  "gain_reference": 0.01,
+  "reserved_bandwidth": 100000,
+  "anonymization_seconds": 0.01,
+  "control_seconds": 0.01,
+  "backhaul_seconds": 0.005,
+  "lambda_time": 1,
+  "rejection_cost": 3,
+  "initial_active": [
+    0,
+    0
+  ],
+  "servers": [
+    {
+      "capacity": 30,
+      "memory": 6000000,
+      "idle_power": 0.2,
+      "sleep_power": 0.02,
+      "wake_energy": 0.05,
+      "kappa": 0.0002,
+      "ap": 0,
+      "models": [
+        "toy"
+      ]
+    },
+    {
+      "capacity": 25,
+      "memory": 5000000,
+      "idle_power": 0.15,
+      "sleep_power": 0.01,
+      "wake_energy": 0.04,
+      "kappa": 0.0003,
+      "ap": 0,
+      "models": [
+        "toy"
+      ]
+    }
+  ],
+  "access_points": [
+    {
+      "position": 1,
+      "bandwidth": 300000
+    }
+  ],
+  "units": {
+    "work": "reference_work",
+    "rate": "reference_work/s",
+    "tensor": "bit",
+    "memory": "byte",
+    "energy": "J",
+    "time": "s",
+    "bandwidth": "Hz",
+    "power": "W"
+  },
+  "profiles": {
+    "toy": {
+      "source": "Synthetic three-block graph with two crossing tensors; code correctness only",
+      "blocks": 3,
+      "legal_splits": [
+        1,
+        2
+      ],
+      "sizes": {
+        "1": {
+          "full_work": 4,
+          "splits": {
+            "1": {
+              "local_work": 1,
+              "edge_work": 3,
+              "crossing_tensors_bits": [
+                10000,
+                2000
+              ],
+              "memory_bytes": 1000000
+            },
+            "2": {
+              "local_work": 2.5,
+              "edge_work": 1.5,
+              "crossing_tensors_bits": [
+                4000,
+                1000
+              ],
+              "memory_bytes": 700000
+            }
+          }
+        },
+        "2": {
+          "full_work": 8,
+          "splits": {
+            "1": {
+              "local_work": 2,
+              "edge_work": 6,
+              "crossing_tensors_bits": [
+                20000,
+                4000
+              ],
+              "memory_bytes": 2000000
+            },
+            "2": {
+              "local_work": 5,
+              "edge_work": 3,
+              "crossing_tensors_bits": [
+                8000,
+                2000
+              ],
+              "memory_bytes": 1400000
+            }
+          }
+        },
+        "3": {
+          "full_work": 12,
+          "splits": {
+            "1": {
+              "local_work": 3,
+              "edge_work": 9,
+              "crossing_tensors_bits": [
+                30000,
+                6000
+              ],
+              "memory_bytes": 3000000
+            },
+            "2": {
+              "local_work": 7.5,
+              "edge_work": 4.5,
+              "crossing_tensors_bits": [
+                12000,
+                3000
+              ],
+              "memory_bytes": 2100000
+            }
+          }
+        }
+      }
+    }
+  }
+}

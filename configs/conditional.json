@@ -1,0 +1,4 @@
+{
+  "environment": "environments/conditional.json",
+  "algorithm": "algorithms/conditional_ppo.json"
+}

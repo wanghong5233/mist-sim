@@ -1,0 +1,78 @@
+# MIST 仿真实现规格
+
+本文件描述当前实现、接口和边界，历史由Git保存。模型对应导师V6小修工作稿；本地布局中的工作稿为`../../03_论文/MIST/main.tex`，不随代码分发。执行记录、实验协议和结果核验留在本机；本文件不依赖这些私有资产才能阅读。
+
+## 环境与论文对应
+
+|职责|实现|约束|
+|---|---|---|
+|匿名发布|anonymity.py|同模型/服务类/公开权重内逐级泛化，区间覆盖真实值，不足k抑制；短期标识不包含终端身份|
+|物理推进|environment.py|慢层读历史→发布当前请求→逐隙ready=旧激活×新激活→快层→分配与执行；只有执行推进一隙|
+|任务候选|environment.py、profiles.py|拒绝、本地、合法内部切分；最低边缘速率=边缘工作量/(期限下界−非边缘耗时)，分母非正则不可行|
+|资源|PublicProblem、allocation.py|计算/显存/AP带宽独立约束；本地不占边缘资源；P3以双精度单调根和对偶二分求解|
+|真实执行|environment.py|无跨槽队列；超期取消剩余阶段，只计已执行能耗；真实内存超限的服务器本批后端准入失败|
+|评价|evaluation.py|完成+拒绝+抑制+超期+资源失败=全部到达；总体按时率=总完成/总到达，零分母返回空值|
+
+控制器只接收公开对象及允许的历史反馈，不能访问当前未发布请求。真实属性由环境执行层持有。保守候选逐规格取上界，不假定剖面单调。Nominal使用区间中心；Full-Information只精确化同一已发布集合，保持共同抑制集合，单列为理想参照。
+
+静态能耗每槽计一次、唤醒仅0→1计一次。保守调度成本不因实际超期取消而回写。默认控制耗时为条件假设，Python实测耗时另记；measured-latency模式显式计入超出预留的开销，不能作为设备部署测量。本地DNN剖面及系统参数来源见data/SCENARIO.md，获取边界见[data说明](data/README.md)。
+
+## State、动作与网络
+
+|张量（float32/CPU）|快层|慢层|
+|---|---|---|
+|items `[行数,19]`|全批候选：动作类型、剖面成本、期限/开销、资源及剩余比例|2H个开关条目及历史公开请求的需求特征|
+|servers `[H,13]`|服务器资源/功耗、激活/就绪、历史利用等|同类公开服务器特征|
+|context `[11]`|当前公开统计、历史反馈、控制相位与剩余时间|历史统计、控制相位与剩余时间|
+|prefix `[7]`|处理进度、累计资源和接纳数|已选服务器开关的数量/比例|
+|actor输出|每个请求K个条件候选分数，非法项掩码为零概率|每服务器2个条件开关分数|
+|critic输出|每个物理时隙一个标量|每个控制区间一个标量|
+
+各特征的精确定义以`policies/networks.py`的frame/features函数为准。输入采用训练校准统计：`z=(x−mean)/max(std,0.1)`，再`z/(1+abs(z))`映射至(-1,1)。校准执行真实采样动作；统计固定，评价不更新；超范围和Tanh饱和比例进入日志。有限历史/均值池化是一种部分可观测策略近似，不保证充分Markov状态。
+
+每层actor与critic编码器独立：items `19→64→64→64`，servers `13→64→64→64`，分别均值池化。actor拼接当前候选64、两组池化128、context11、prefix7：`210→64→64→1`；critic为`139→64→64→1`。每个MLP有两个Tanh隐藏层和线性输出。线性权重按[out,in]存放。每层actor 36,545、critic 32,001参数；两层合计137,092，FP32权重约0.523 MiB，不含优化器、激活及轨迹。
+
+当前H=8，上层联合开关空间2^8=256；快层每请求最多`2+8×4=34`候选，整批联合动作是条件选择的组合，容量掩码进一步缩小可行集合。共享编码器不枚举全部组合，参数量不随联合动作数指数增长。64宽保留为未调优起点；是否扩网须看充分训练后的价值误差、策略熵/KL及验证表现，不能由输入维数直接推导。
+
+## Reward、GAE与PPO
+
+物理奖励为`r=−(保守能耗 + lambda_time×公开权重加权时延 + rejection_cost×被拒绝请求的公开权重之和)`。当前lambda_time=1、rejection_cost=20是目标偏好，非测量或论文唯一值；抑制单列，不伪装成策略拒绝。
+
+训练采用**running return std**：按物理槽累计`R←gamma×R+r`（episode起点重置R），Welford更新R的运行方差，`r_train=clip(r/sqrt(max(var(R),1e−8)),−10,10)`。不平移奖励，不要求奖励同时为正负。两层共享统计，校准和每个PPO阶段结束时更新；采样至本阶段更新完成期间冻结，评价不更新。价值输出通过非训练value_scale换算单位，统计与该比例均保存到检查点。裁剪可能改变偏好，必须报告触发数；±10是单槽保护界，慢层区间累计奖励可超出该界。
+
+对持续d槽的transition：`delta=r_interval+gamma^d×V(next)−V(current)`，终止时next项为0；`A=delta+gamma^d×lambda×A_next`，终止/截断/缓冲末端均停止递推。lambda按本层决策步衰减，gamma按物理槽衰减。快层d=1，慢层d≤Q；区间内部奖励逐槽折扣。
+
+PPO的critic目标是**GAE lambda-return `A+V_old`**，不是完整Monte Carlo回报。日志另列采样片段折扣和（截断末端加bootstrap），两者不可混称。actor用整层rollout的`(A−mean(A))/max(std(A),1e−8)`；单样本不去均值。gamma=1保持有限时域未折扣目标；lambda=.95的TD权重约20个决策步，因此快层约20槽、Q4慢层约80槽，并不等于只需要20条训练数据。
+
+联合logprob按原请求顺序/动作前缀重算并求和；容量掩码参与条件概率。PPO裁剪比率区间[.8,1.2]；loss=actor+.5×(.5×MSE)−.01×entropy。空动作时隙仍更新critic，actor项为零；上下层分别on-policy采样，另一层更新后不能复用旧轨迹。actor/critic各自裁剪梯度范数至.5，Adam lr=3e−4/eps=1e−5；全buffer更新后联合KL>.03提前结束epoch。详细逐批中间量可独立复算。
+
+## Episode、rollout与更新节奏
+
+当前条件配置为128槽episode、Q=4、8服务器/40终端、每终端每槽到达概率.5。一个请求内部选择不是一个transition；一整个批次动作才对应一个快层transition。episode是环境重置单位，rollout是本次采样集合，minibatch是一次梯度步的数据，epoch是遍历该rollout一次。
+
+|阶段|每次rollout|物理槽/完整episodes|minibatch=64，epochs≤2|
+|---|---|---|---|
+|快层预训练|1024个快层transition，共8次新采样更新|每次1024槽/8条|每epoch16批，最多32步|
+|交替快层|1024个快层transition|1024槽/8条|每epoch16批，最多32步|
+|交替慢层|256个区间transition|1024槽/8条|每epoch4批，最多8步|
+
+预训练总量8192按fast_slots分块，最后一块允许不足1024；块后更新再重新采样，恢复跳过完成块。之后28次慢/快交替，HPGI合计65536训练槽，校准/验证另计。这是可配置起点，不是已证明足够的训练量。相邻样本相关，不能当独立样本；预训练一大块8192只更新一次的旧节奏已替换。
+
+17槽episode的慢层持续长度为4/4/4/4/1。真实终止不bootstrap；采样截断使用正确下一观测和价值，GAE不跨重置。新collect从新episode开始，截断后未采样的后缀不补造。若horizon/Q/方法改变，物理交互预算必须重新核算：Q1、Always-On、仅慢层学习不能凭相同cycles宣称公平。
+
+## 方法与配置
+
+所有方法共用环境、指标和PPO核心；[README](README.md)列全部方法入口。Fixed-Window输出无联合容量掩码的离散动作和学习速率，PPO联合密度含原始高斯潜变量；执行前固定投影不修改行为概率，保留投影前违约。Greedy快层比较完整P3增量成本；慢层用上一完整公开区间从全开逐台试关，仅预测总成本下降才接受，不看未来。有界枚举只有完整搜索才报告最优。
+
+`configs/environments/`管场景，`configs/algorithms/`管采样、网络及优化，顶层JSON组合二者。overlay/--set严格校验键；`ppo_layers.upper/lower`可覆盖宽度、学习率等，gamma共用。12条validation是可改的开发样本量，不是batch或论文固定值；min_service_rate=null，选中最低验证成本不代表服务要求满足。
+
+检查点保存优化器、统计、随机状态、阶段及源码/输入签名。完成阶段last可续训；中断阶段failed_last只诊断。新增源码不强行加载旧签名权重。正式runs保存原始证据；正确性测试默认临时运行，退出清理。
+
+## 定位问题与外部参考
+
+先看resolved_config和progress阶段；`*_rollout.json`给出样本/物理槽/episode/小批次数及代表transition，`*_behavior.json`保存完整观测/前缀/掩码，`*_inputs.json`给出输入与网络诊断，`*_update.json`保存TD/GAE/loss/梯度。`inspect_logs.py`独立复算；`check_rollouts.py`只采样核验。正常logprob比=1、梯度有限并不证明收敛。
+
+- [CleanRL PPO](https://github.com/vwxyzjn/cleanrl/blob/fe8d8a03c41a7ef5b523e2e354bd01c363e786bb/cleanrl/ppo.py)：fe8d8a03c41a7ef5b523e2e354bd01c363e786bb，MIT；正交初始化、Adam、GAE、clip/KL/梯度经验参考，没有复制源码文件。
+- [SB3](https://github.com/DLR-RM/stable-baselines3/tree/0cdcd200deef06b9ad0af72f6ddfb07c06c6df39)：MIT；终止/截断、种子与评价核对。[MaskablePPO](https://github.com/Stable-Baselines-Team/stable-baselines3-contrib/tree/a8af63682070df0bda9707400b2e971055600910)：MIT；掩码语义核对，不调用其learn。
+- [MERA来源及许可](references/README.md)：只读参考，未移植其DDPG、合成资源或奖励。
+- 奖励缩放参考本机SB3 2.3.2的[VecNormalize](https://github.com/DLR-RM/stable-baselines3/blob/v2.3.2/stable_baselines3/common/vec_env/vec_normalize.py)，文件SHA-256 `dfe7723393b73e7bf57a414dd77d0265e8d46412a7b9475f5679d62132ea997b`；本实现改为phase边界更新无伪计数Welford统计，并显式换算critic单位，没有复制其文件。

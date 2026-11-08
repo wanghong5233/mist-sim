@@ -1,0 +1,45 @@
+{
+  "method": "hpgi",
+  "information": "robust",
+  "window": 4,
+  "capacity_mask": true,
+  "learned_rates": false,
+  "fixed_split": 1,
+  "long_term_feedback": true,
+  "history_slots": 4,
+  "ppo": {
+    "hidden": 64,
+    "learning_rate": 0.0003,
+    "adam_epsilon": 0.00001,
+    "clip": 0.2,
+    "gae_lambda": 0.95,
+    "gamma": 1,
+    "max_grad_norm": 0.5,
+    "value_coefficient": 0.5,
+    "entropy_coefficient": 0.01,
+    "epochs": 2,
+    "minibatch": 16,
+    "target_kl": 0.03
+  },
+  "training": {
+    "pretrain_slots": 32,
+    "fast_slots": 32,
+    "slow_intervals": 8,
+    "cycles": 2,
+    "calibration_episodes": 2
+  },
+  "seeds": {
+    "train": 1000,
+    "validation": 2000,
+    "test": 3000
+  },
+  "device": "cpu",
+  "ppo_layers": {
+    "upper": {},
+    "lower": {}
+  },
+  "validation": {
+    "min_service_rate": null,
+    "selection": "best_feasible_cost"
+  }
+}
