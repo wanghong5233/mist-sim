@@ -47,7 +47,9 @@ def test_joint_ratio_masks_and_no_resampling(config):
     hand = 0.0
     encoding = controller.lower.encode(sample["frame"])
     for step in sample["steps"]:
-        distribution, _ = controller.lower.distribution(encoding, step["features"], step["prefix"], step["mask"])
+        conditional, servers = controller.lower.encode(step["prefix_frame"], with_servers=True)
+        distribution, _ = controller.lower.distribution(conditional, step["features"], step["prefix"],
+                                                        step["mask"], servers, step["targets"])
         hand += math.log(float(distribution.probs[step["action"]]))
         for legal, probability in zip(step["mask"], distribution.probs):
             if not legal:

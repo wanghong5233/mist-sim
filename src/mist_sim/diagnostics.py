@@ -77,8 +77,8 @@ def policy_input_diagnostics(policy, samples, limit=16):
     import torch
     selected = [samples[index] for index in np.linspace(0, len(samples) - 1, min(limit, len(samples)), dtype=int)]
     rows = {
-        "item": [row for sample in selected for row in sample["frame"]["items"]] +
-                [row for sample in selected for step in sample["steps"] for row in step["features"]],
+        "item": [row for sample in selected for row in sample["frame"]["items"]],
+        "action": [row for sample in selected for step in sample["steps"] for row in step["features"]],
         "server": [row for sample in selected for row in sample["frame"]["servers"]] +
                   [row for sample in selected for step in sample["steps"] if "prefix_frame" in step for row in step["prefix_frame"]["servers"]],
         "context": [sample["frame"]["context"] for sample in selected],

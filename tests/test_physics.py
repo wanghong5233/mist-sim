@@ -100,6 +100,8 @@ def test_information_boundary(config):
     assert env_first.upper_observation() == env_second.upper_observation()
     public_first, public_second = env_first.begin_slot([1, 1]), env_second.begin_slot([1, 1])
     assert public_first.as_dict() == public_second.as_dict()
+    from mist_sim.policies.networks import lower_frame
+    assert lower_frame(public_first) == lower_frame(public_second)
 
 
 def test_shared_ap_and_projection(config):
@@ -121,6 +123,7 @@ def test_shared_ap_and_projection(config):
 
 def test_bound_records_and_reference(config):
     config["horizon"] = 2
+    config["window"] = 1
     config["k"] = 1
     config["initial_active"] = [1, 1]
     trace = [[request()], []]

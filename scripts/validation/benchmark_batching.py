@@ -9,7 +9,7 @@ import statistics
 import time
 from pathlib import Path
 import torch
-from mist_sim.policies.networks import SetPolicy
+from mist_sim.policies.networks import SetPolicy, CONTEXT_DIM
 from mist_sim.policies.batching import replay_batch
 from mist_sim.traces import read_behavior
 
@@ -29,7 +29,7 @@ def main():
         samples = []
         for i in range(args.samples):
             frame = dict(items=torch.randn(80 + i % 10, 19).tolist(),
-                         servers=torch.randn(8, 13).tolist(), context=torch.randn(11).tolist())
+                         servers=torch.randn(8, 13).tolist(), context=torch.randn(CONTEXT_DIM).tolist())
             steps = [dict(features=torch.randn(2 + j % 16, 19).tolist(),
                           prefix=torch.randn(7).tolist(), mask=[True] * (2 + j % 16), action=0)
                      for j in range(16 + i % 8)]

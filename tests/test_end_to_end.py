@@ -51,8 +51,9 @@ def test_masked_logits_have_zero_gradient_and_exact_joint_sum(config):
     logprob, _, _ = trainer.controller.upper.replay(sample)
     terms = []
     for step in sample["steps"]:
+        encoding, servers = trainer.controller.upper.encode(step["prefix_frame"], with_servers=True)
         distribution, _ = trainer.controller.upper.distribution(
-            trainer.controller.upper.encode(step["prefix_frame"]), step["features"], step["prefix"], step["mask"])
+            encoding, step["features"], step["prefix"], step["mask"], servers, step["targets"])
         terms.append(float(distribution.log_prob(torch.tensor(step["action"]))))
     assert float(logprob) == pytest.approx(sum(terms), abs=1e-6)
     assert math.exp(float(logprob) - sample["logprob"]) == pytest.approx(1., abs=1e-6)
@@ -63,7 +64,7 @@ def test_control_phase_exposed_and_clock_not_advanced(config):
     for slot in range(5):
         problem = environment.begin_slot([1] * len(config["servers"]))
         frame = lower_frame(problem)
-        assert len(frame["context"]) == CONTEXT_DIM == 11
+        assert len(frame["context"]) == CONTEXT_DIM == 7
         assert frame["context"][-1] == (slot % config["window"]) / config["window"]
         trainer = Trainer(config, 91)
         actions, predicted, sample = trainer.controller.fast(problem)
@@ -121,9 +122,9 @@ def test_tensor_widths_match_actual_network(config):
         tensors = report["tensors"]
         assert tensors["frame_items_width"] == 19
         assert tensors["servers"] == [len(config["servers"]), 13]
-        assert tensors["context"] == [11] and tensors["prefix"] == [7]
+        assert tensors["context"] == [CONTEXT_DIM] and tensors["prefix"] == [7]
         hidden = config["ppo"]["hidden"]
-        assert report["linear_layers"]["score.0"]["weight"] == [hidden, 3 * hidden + 11 + 7]
-        assert report["linear_layers"]["value_head.0"]["weight"] == [hidden, 2 * hidden + 11]
+        assert report["linear_layers"]["score.0"]["weight"] == [hidden, 4 * hidden + CONTEXT_DIM + 7]
+        assert report["linear_layers"]["value_head.0"]["weight"] == [hidden, 2 * hidden + CONTEXT_DIM]
         logprob, entropy, value = policy.replay(buffer.samples[0])
         assert logprob.shape == entropy.shape == value.shape == torch.Size([])

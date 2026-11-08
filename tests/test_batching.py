@@ -1,7 +1,7 @@
 import copy
 import pytest
 import torch
-from mist_sim.policies.networks import SetPolicy
+from mist_sim.policies.networks import SetPolicy, CONTEXT_DIM
 from mist_sim.policies.batching import replay_batch, replay_chunks
 from mist_sim.ppo import loss_terms
 from mist_sim.config import validate
@@ -15,7 +15,7 @@ def test_ragged_replay_loss_and_gradients(config, upper, rates):
     samples = []
     for n in (0, 1, 4, 2):
         frame = dict(items=torch.randn(n, 19).tolist(), servers=torch.randn(3, 13).tolist(),
-                     context=torch.randn(11).tolist())
+                     context=torch.randn(CONTEXT_DIM).tolist())
         steps = []
         for j in range(n):
             step = dict(features=torch.randn(j + 2, 19).tolist(), prefix=torch.randn(7).tolist(),
@@ -64,7 +64,7 @@ def test_thread_setting_validation(config):
 def test_batched_mask_zero_gradient():
     torch.set_num_threads(1)
     policy = SetPolicy(16)
-    frame = dict(items=[], servers=[[0.] * 13], context=[0.] * 11)
+    frame = dict(items=[], servers=[[0.] * 13], context=[0.] * CONTEXT_DIM)
     sample = dict(frame=frame, steps=[dict(features=[[0.] * 19, [1.] * 19, [2.] * 19],
                   prefix=[0.] * 7, mask=[True, False, True], action=0)])
     outputs = []

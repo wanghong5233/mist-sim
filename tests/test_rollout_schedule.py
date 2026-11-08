@@ -5,6 +5,7 @@ import torch
 from mist_sim.buffers import RolloutBuffer
 from mist_sim.diagnostics import rollout_diagnostics
 from mist_sim.training import Trainer
+from mist_sim.policies.networks import CONTEXT_DIM
 
 
 def test_pretraining_chunks_resume_without_reusing_samples(config, tmp_path):
@@ -33,7 +34,7 @@ def test_pretraining_chunks_resume_without_reusing_samples(config, tmp_path):
 
 def test_rollout_return_diagnostics_distinguish_lambda_and_segment_returns(config):
     buffer = RolloutBuffer("lower", 0, 0)
-    frame = {"items": [], "servers": [], "context": [0] * 11}
+    frame = {"items": [], "servers": [], "context": [0] * CONTEXT_DIM}
     for index, (reward, value, next_value, terminated, truncated) in enumerate(
             [(2, 1, 3, False, False), (4, 3, 0, True, False), (5, 7, 11, False, True)]):
         buffer.append(dict(value=value, frame=frame, steps=[], physical_rewards=[reward],

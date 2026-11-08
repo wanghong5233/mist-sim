@@ -63,7 +63,9 @@ def enumerate_trajectory(config, trace, max_nodes=10000, timeout_seconds=5):
             return
         if cost >= best_cost:
             return
-        for active in itertools.product((0, 1), repeat=len(config["servers"])):
+        controls = (itertools.product((0, 1), repeat=len(config["servers"]))
+                    if environment.slot % config["window"] == 0 else [tuple(environment.active)])
+        for active in controls:
             if status != "complete":
                 return
             pending = copy.deepcopy(environment)

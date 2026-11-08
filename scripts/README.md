@@ -14,7 +14,7 @@
 |validation/|report_hpgi_probe.py --run 路径|检查既有训练资产、日志及耗时；不继续训练|
 |validation/|verify_commands.py --workspace 路径|完整验证套件的CLI子检查|
 |validation/|build_verification_index.py --workspace 路径|检查临时套件资产及哈希|
-|validation/|check_training_scenario.py|开发请求可行性诊断，不搜索场景|
+|validation/|check_training_scenario.py|单请求可行上界；--witness构造调度并重放，--exact有界穷举预定义小网格及最佳固定切分，--seed可重复指定；无网络更新，默认仅打印|
 |validation/|inspect_training_design.py|历史固定奖励尺度探针，仅用于重建当时检查，不作为当前归一化规格|
 |maintenance/|check_environment.py|Conda与导入路径核验|
 |maintenance/|check_publish.py|推送前检查暂存文件和Git历史，不输出秘密内容，不访问远端|

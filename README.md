@@ -78,6 +78,7 @@ mist-sim/
 & D:/Anaconda/envs/pytorch/python.exe scripts/validation/check_rollouts.py
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim.verification
 & D:/Anaconda/envs/pytorch/python.exe scripts/validation/check_profile_chain.py
+& D:/Anaconda/envs/pytorch/python.exe scripts/validation/check_training_scenario.py --witness --exact --seed 4100017
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method hpgi --dry-run
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method hpgi --seed 4200001
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim evaluate --checkpoint logs/runs/<训练ID>/checkpoints/final.pt --seed 4400019
@@ -87,6 +88,8 @@ mist-sim/
 ```
 
 占位ID替换为实际运行路径；学习方法必须加载自己的权重。`--overlay 文件.json`和`--set ppo.learning_rate=0.0001`严格覆盖配置，未知键报错；上下层可通过ppo_layers独立配置。变更源码/配置/剖面后拒绝无说明续训。
+
+场景检查命令不更新网络：先计算单请求可行上界，--witness构造并重放完整调度，--exact穷举预先定义的两服务器小网格及所有合法固定切分。默认仅打印，搜索不完整会返回失败且不报告最优差距。它检查“存在可服务和改善成本的选择”，不保证HPGI优于全部基线。当前场景期限[0.8,1.0]秒、每请求10MHz/每AP40MHz；推导与条件假设见data/SCENARIO.md。状态结构已变更，旧210维评分网络的检查点不能续训为当前270维网络。
 
 ## 日志与资产
 

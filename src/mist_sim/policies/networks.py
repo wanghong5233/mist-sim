@@ -6,7 +6,7 @@ from torch.distributions import Categorical, Normal
 from ..profiles import Profiles
 from ..environment import candidates
 
-ITEM_DIM, SERVER_DIM, CONTEXT_DIM, PREFIX_DIM = 19, 13, 11, 7
+ITEM_DIM, SERVER_DIM, CONTEXT_DIM, PREFIX_DIM = 19, 13, 7, 7
 
 
 def mlp(input_size, output_size, hidden=64, output_gain=1.0):
@@ -35,7 +35,8 @@ class Normalizer(nn.Module):
             raise ValueError("Nonfinite normalization input")
         if len(values):
             self.mean.copy_(values.mean(0))
-            self.scale.copy_(values.std(0, unbiased=False).clamp(min=0.1))
+            deviation = values.std(0, unbiased=False)
+            self.scale.copy_(torch.where(deviation > 1e-8, deviation, values.mean(0).abs().clamp(min=1.0)))
         self.fitted.fill_(True)
 
     def forward(self, values):
@@ -64,53 +65,68 @@ def context_features(config, slot, history, count):
             float(np.mean([item["released"] for item in history])) if history else 0,
             float(np.mean([item["cost"] for item in history])) if history else 0,
             float(np.mean([item["completed"] for item in history])) if history else 0,
-            config["slot_seconds"], config["lambda_time"], config["rejection_cost"],
-            config["window"] / config["horizon"], float(bool(history)),
+            float(bool(history)),
             (slot % config["window"]) / config["window"]]
 
 
 def item_features(choice, config):
     return [float(choice["kind"] == "reject"), float(choice["kind"] == "local"),
-            float(choice["kind"] == "edge"), choice["server"] / max(1, len(config["servers"])),
-            choice["split"] / 10, choice["minimum"], choice["memory"] / 1e6,
+            float(choice["kind"] == "edge"), choice["bits"] / 1e6,
+            choice["deadline"] - choice["delay_fixed"], choice["minimum"], choice["memory"] / 1e6,
             choice["bandwidth"] / 1e5, choice["cost_fixed"], choice["alpha"],
             choice["beta"], choice["delay_fixed"], choice["deadline"], choice["edge_work"],
             choice["local_work"], choice["weight"], 0.0, 0.0, 0.0]
 
 
-def upper_frame(observation):
+def upper_choices(observation):
     config = observation["config"]
     active = observation["active"]
     items = []
     for index, server in enumerate(config["servers"]):
         for enabled in (0, 1):
-            items.append([0, 0, enabled, index / len(active), 0, server["capacity"],
+            items.append([0, 0, enabled, active[index], enabled * active[index], server["capacity"],
                           server["memory"] / 1e6, 0, server["idle_power"] if enabled else server["sleep_power"],
                           server["kappa"], server["wake_energy"] * max(0, enabled - active[index]),
                           0, 0, 0, 0, 1, 0, 0, 0])
+    return items
+
+
+def upper_frame(observation):
+    config, active = observation["config"], observation["active"]
     history = observation["history"] if config["long_term_feedback"] else []
     profiles = Profiles(config)
-    models = sorted(config["profiles"])
+    server_rows = server_features(config, active, active, history)
+    items, request_sizes, item_servers = [], [], []
     for batch in history:
         for request in batch["public"]:
-            work = profiles.bound(request["model"], request["size"], None, config["information"])["local_work"]
-            minimum_rates = [choice["minimum"] for choice in candidates(config, profiles, request, [1] * len(active))
-                             if choice["kind"] == "edge"]
-            items.append([0, 0, 0, models.index(request["model"]) / len(models),
-                          sum(request["position"]) / 2, min(minimum_rates, default=0.0),
-                          request["size"][0], request["size"][1], work,
-                          request["deadline"][0], request["deadline"][1],
-                          request["position"][0], request["position"][1],
-                          work, 0, request["weight"], request["group_size"],
-                          float(np.quantile(minimum_rates, .5)) if minimum_rates else 0.0, len(minimum_rates)])
-    return {"servers": server_features(config, active, active, history), "items": items,
+            choices = candidates(config, profiles, request, [1] * len(active))
+            items.extend(item_features(choice, config) for choice in choices)
+            item_servers.extend(server_rows[choice["server"]] if choice["server"] >= 0 else [0.] * SERVER_DIM
+                                for choice in choices)
+            request_sizes.append(len(choices))
+    return {"servers": server_rows, "items": items, "item_servers": item_servers,
+            "request_sizes": request_sizes,
             "context": context_features(config, observation["slot"], observation["history"], 0)}
 
 
 def lower_frame(problem):
-    return {"servers": server_features(problem.config, problem.active, problem.ready, problem.history),
+    server_rows = server_features(problem.config, problem.active, problem.ready, problem.history)
+    return {"servers": server_rows,
             "items": [item_features(choice, problem.config) for options in problem.choices for choice in options],
+            "item_servers": [server_rows[choice["server"]] if choice["server"] >= 0 else [0.] * SERVER_DIM
+                             for options in problem.choices for choice in options],
+            "request_sizes": [len(options) for options in problem.choices],
             "context": context_features(problem.config, problem.slot, problem.history, len(problem.public))}
+
+
+def lower_prefix_frame(frame, problem, usage, index, allocated, owners):
+    remaining = [[(server["capacity"] - usage["compute"][server_index]) / server["capacity"],
+                  (server["memory"] - usage["memory"][server_index]) / server["memory"],
+                  (problem.config["access_points"][server["ap"]]["bandwidth"] - usage["bandwidth"][server["ap"]]) /
+                  problem.config["access_points"][server["ap"]]["bandwidth"]]
+                 for server_index, server in enumerate(problem.config["servers"])]
+    return dict(frame, remaining=remaining, allocated=list(allocated), allocation_servers=list(owners),
+                request_pending=[float(request_index >= index) for request_index in range(len(problem.public))])
 
 
 class SetPolicy(nn.Module):
@@ -119,10 +135,15 @@ class SetPolicy(nn.Module):
         self.learned_rates = learned_rates
         self.register_buffer("value_scale", torch.tensor(1.))
         self.item_norm, self.server_norm, self.context_norm = Normalizer(ITEM_DIM), Normalizer(SERVER_DIM), Normalizer(CONTEXT_DIM)
+        self.action_norm = Normalizer(ITEM_DIM)
         self.prefix_norm = Normalizer(PREFIX_DIM)
         self.actor_items, self.actor_servers = mlp(ITEM_DIM, hidden, hidden), mlp(SERVER_DIM, hidden, hidden)
         self.critic_items, self.critic_servers = mlp(ITEM_DIM, hidden, hidden), mlp(SERVER_DIM, hidden, hidden)
-        combined = hidden * 3 + CONTEXT_DIM + PREFIX_DIM
+        self.actor_requests, self.critic_requests = mlp(hidden + 2, hidden, hidden), mlp(hidden + 2, hidden, hidden)
+        self.actor_relations, self.critic_relations = mlp(hidden * 2, hidden, hidden), mlp(hidden * 2, hidden, hidden)
+        self.actor_resources, self.critic_resources = mlp(hidden * 2 + 4, hidden, hidden), mlp(hidden * 2 + 4, hidden, hidden)
+        self.actor_actions = mlp(ITEM_DIM, hidden, hidden)
+        combined = hidden * 4 + CONTEXT_DIM + PREFIX_DIM
         self.score = mlp(combined, 1, hidden, 0.01)
         self.value_head = mlp(hidden * 2 + CONTEXT_DIM, 1, hidden)
         if learned_rates:
@@ -131,29 +152,42 @@ class SetPolicy(nn.Module):
 
     def fit_normalizers(self, frames, steps=()):
         frames = list(frames) + [step["prefix_frame"] for step in steps if "prefix_frame" in step]
-        self.item_norm.fit([row for frame in frames for row in frame["items"]] +
-                           [row for step in steps for row in step["features"]])
-        self.server_norm.fit([row for frame in frames for row in frame["servers"]])
-        self.context_norm.fit([frame["context"] for frame in frames])
+        def unique_rows(key):
+            seen, rows = set(), []
+            for frame in frames:
+                if key not in frame:
+                    continue
+                values = frame[key]
+                if id(values) not in seen:
+                    seen.add(id(values))
+                    rows.extend(values)
+            return rows
+        self.item_norm.fit(unique_rows("items") + unique_rows("allocated"))
+        self.action_norm.fit([row for step in steps for row in step["features"]])
+        self.server_norm.fit(unique_rows("servers"))
+        contexts = {id(frame["context"]): frame["context"] for frame in frames}
+        self.context_norm.fit(list(contexts.values()))
         self.prefix_norm.fit([step["prefix"] for step in steps])
 
-    def encode(self, frame, critic=False):
-        items = torch.tensor(frame["items"], dtype=torch.float32).reshape(-1, ITEM_DIM)
-        servers = torch.tensor(frame["servers"], dtype=torch.float32).reshape(-1, SERVER_DIM)
-        context = self.context_norm(torch.tensor(frame["context"], dtype=torch.float32))
-        item_encoder = self.critic_items if critic else self.actor_items
-        server_encoder = self.critic_servers if critic else self.actor_servers
-        pooled_items = item_encoder(self.item_norm(items)).mean(0) if len(items) else torch.zeros(server_encoder[-1].out_features)
-        pooled_servers = server_encoder(self.server_norm(servers)).mean(0)
-        return pooled_items, pooled_servers, context
+    def encode(self, frame, critic=False, with_servers=False, request_cache=None):
+        from .batching import encode_frames
+        encoded, servers = encode_frames(self, [frame], critic, with_servers=True, request_cache=request_cache)
+        hidden = self.actor_items[-1].out_features
+        parts = tuple(encoded[0].split([hidden, hidden, CONTEXT_DIM]))
+        return (parts, servers) if with_servers else parts
 
     def value(self, frame):
         return self.value_head(torch.cat(self.encode(frame, critic=True))).squeeze() * self.value_scale
 
-    def distribution(self, frame_encoding, features, prefix, mask):
-        encoded_items = self.actor_items(self.item_norm(torch.tensor(features, dtype=torch.float32)))
+    def distribution(self, frame_encoding, features, prefix, mask, servers=None, targets=None):
+        encoded_items = self.actor_actions(self.action_norm(torch.tensor(features, dtype=torch.float32)))
         shared = torch.cat((*frame_encoding, self.prefix_norm(torch.tensor(prefix, dtype=torch.float32))))
-        combined = torch.cat((encoded_items, shared.expand(len(features), -1)), dim=1)
+        target_encoding = torch.zeros_like(encoded_items)
+        if targets is not None:
+            indices = torch.tensor(targets, dtype=torch.long)
+            valid_targets = indices >= 0
+            target_encoding[valid_targets] = servers[indices[valid_targets]]
+        combined = torch.cat((encoded_items, shared.expand(len(features), -1), target_encoding), dim=1)
         logits = self.score(combined).flatten()
         if not torch.isfinite(logits).all():
             raise FloatingPointError("Nonfinite policy logits")
@@ -164,12 +198,14 @@ class SetPolicy(nn.Module):
         return Categorical(logits=logits), combined
 
     def replay(self, sample):
-        encoding = self.encode(sample["frame"])
+        encoding, servers = self.encode(sample["frame"], with_servers=True)
         logprob = torch.zeros(())
         entropy = torch.zeros(())
         for step in sample["steps"]:
-            conditional_encoding = self.encode(step["prefix_frame"]) if "prefix_frame" in step else encoding
-            distribution, combined = self.distribution(conditional_encoding, step["features"], step["prefix"], step["mask"])
+            conditional_encoding, conditional_servers = (self.encode(step["prefix_frame"], with_servers=True)
+                                                        if "prefix_frame" in step else (encoding, servers))
+            distribution, combined = self.distribution(conditional_encoding, step["features"], step["prefix"], step["mask"],
+                                                      conditional_servers, step.get("targets"))
             selected = torch.tensor(step["action"])
             logprob = logprob + distribution.log_prob(selected)
             entropy = entropy + distribution.entropy()
@@ -183,7 +219,8 @@ class SetPolicy(nn.Module):
     @torch.no_grad()
     def upper_action(self, observation, deterministic=False, record=True, cached=None):
         frame = cached[0] if cached is not None else upper_frame(observation)
-        pooled_items, _, context = self.encode(frame)
+        choices = upper_choices(observation)
+        request_cache = {}
         logprob = torch.zeros(())
         actions, steps, activation_probabilities = [], [], []
         for index in range(len(observation["active"])):
@@ -191,16 +228,15 @@ class SetPolicy(nn.Module):
             for previous_index, enabled in enumerate(actions):
                 prefix_frame["servers"][previous_index][6] = enabled
                 prefix_frame["servers"][previous_index][7] = enabled * observation["active"][previous_index]
-            servers = torch.tensor(prefix_frame["servers"], dtype=torch.float32)
-            encoding = pooled_items, self.actor_servers(self.server_norm(servers)).mean(0), context
-            features = frame["items"][2 * index:2 * index + 2]
+            encoding, servers = self.encode(prefix_frame, with_servers=True, request_cache=request_cache)
+            features = choices[2 * index:2 * index + 2]
             prefix = [index, sum(actions), sum(actions) / max(1, index), 0, 0, 0, 0]
-            distribution, _ = self.distribution(encoding, features, prefix, [True, True])
+            distribution, _ = self.distribution(encoding, features, prefix, [True, True], servers, [index, index])
             action = int(distribution.probs.argmax() if deterministic else distribution.sample())
             if record:
                 activation_probabilities.append(float(distribution.probs[1]))
                 steps.append({"features": features, "prefix": prefix, "mask": [True, True], "action": action,
-                              "prefix_frame": prefix_frame})
+                              "prefix_frame": prefix_frame, "targets": [index, index]})
             actions.append(action)
             if record:
                 logprob = logprob + distribution.log_prob(torch.tensor(action))
@@ -215,12 +251,15 @@ class SetPolicy(nn.Module):
     @torch.no_grad()
     def lower_action(self, problem, deterministic=False, record=True, cached=None):
         frame = cached[0] if cached is not None else lower_frame(problem)
-        encoding = self.encode(frame)
         usage = problem.empty_usage()
+        allocated, owners = [], []
+        request_cache = {}
         actions, steps, predicted = [], [], []
         edge_count, local_count = 0, 0
         logprob = torch.zeros(())
         for index, options in enumerate(problem.choices):
+            prefix_frame = lower_prefix_frame(frame, problem, usage, index, allocated, owners)
+            encoding, servers = self.encode(prefix_frame, with_servers=True, request_cache=request_cache)
             features = [item_features(choice, problem.config) for choice in options]
             for feature, choice in zip(features, options):
                 if choice["kind"] == "edge":
@@ -233,12 +272,14 @@ class SetPolicy(nn.Module):
                       float(usage["bandwidth"].sum()) / 1e5, edge_count, local_count,
                       (len(problem.public) - index) / max(1, len(problem.public))]
             mask = problem.mask(options, usage, capacity=problem.config["capacity_mask"])
-            distribution, combined = self.distribution(encoding, features, prefix, mask)
+            targets = [choice["server"] for choice in options]
+            distribution, combined = self.distribution(encoding, features, prefix, mask, servers, targets)
             action = int(distribution.probs.argmax() if deterministic else distribution.sample())
             choice = options[action]
             if record:
                 logprob = logprob + distribution.log_prob(torch.tensor(action))
-            step = {"features": features, "prefix": prefix, "mask": mask, "action": action} if record else None
+            step = {"features": features, "prefix": prefix, "mask": mask, "action": action,
+                    "prefix_frame": prefix_frame, "targets": targets} if record else None
             rate = 0.0
             if self.learned_rates and choice["kind"] == "edge":
                 mean = self.rate_head(combined[action]).squeeze()
@@ -253,6 +294,9 @@ class SetPolicy(nn.Module):
             if record:
                 steps.append(step)
             problem.reserve(choice, usage)
+            if choice["kind"] == "edge":
+                allocated.append(item_features(choice, problem.config))
+                owners.append(choice["server"])
             edge_count += choice["kind"] == "edge"
             local_count += choice["kind"] == "local"
         if not record:
