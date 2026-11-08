@@ -26,6 +26,8 @@ def iteration_row(metrics):
              "timeout", "on_time_rate", "total_energy", "conservative_cost", "collection_seconds",
              "update_seconds", "phase_seconds")
     row = {name: metrics[name] for name in names}
+    row.update({"activation_probability_" + key: metrics.get("activation_probability", {}).get(key)
+                for key in ("mean", "min", "max")})
     row.update({"energy_" + name: value for name, value in metrics["energy"].items()})
     return row
 

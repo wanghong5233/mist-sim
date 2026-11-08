@@ -185,7 +185,7 @@ class SetPolicy(nn.Module):
         frame = cached[0] if cached is not None else upper_frame(observation)
         pooled_items, _, context = self.encode(frame)
         logprob = torch.zeros(())
-        actions, steps = [], []
+        actions, steps, activation_probabilities = [], [], []
         for index in range(len(observation["active"])):
             prefix_frame = dict(frame, servers=[list(row) for row in frame["servers"]])
             for previous_index, enabled in enumerate(actions):
@@ -198,6 +198,7 @@ class SetPolicy(nn.Module):
             distribution, _ = self.distribution(encoding, features, prefix, [True, True])
             action = int(distribution.probs.argmax() if deterministic else distribution.sample())
             if record:
+                activation_probabilities.append(float(distribution.probs[1]))
                 steps.append({"features": features, "prefix": prefix, "mask": [True, True], "action": action,
                               "prefix_frame": prefix_frame})
             actions.append(action)
@@ -205,7 +206,8 @@ class SetPolicy(nn.Module):
                 logprob = logprob + distribution.log_prob(torch.tensor(action))
         if not record:
             return actions, None
-        sample = {"frame": frame, "steps": steps, "actions": actions}
+        sample = {"frame": frame, "steps": steps, "actions": actions,
+                  "activation_probabilities": activation_probabilities}
         value = cached[1] if cached is not None else self.value(frame)
         sample.update(logprob=float(logprob), value=float(value))
         return actions, sample

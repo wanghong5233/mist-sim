@@ -56,14 +56,18 @@ class ConsoleProgress:
             self.losses[fields["layer"]] = fields.get("loss")
             loss = fields.get("loss")
             loss_text = f"{loss:.5g}" if loss is not None else "未记录"
+            activation = fields.get("activation_probability")
+            probability = (f" | 采样时开启概率均值={activation['mean']:.5f}"
+                           f" 范围=[{activation['min']:.5f},{activation['max']:.5f}]" if activation else "")
             self.write(f"{self.label} 完成 | 平均loss={loss_text} | KL={fields['joint_kl']:.4g}"
-                       f" | 采样={fields['collection_seconds']:.2f}s | PPO={fields['update_seconds']:.2f}s")
+                       f" | 采样={fields['collection_seconds']:.2f}s | PPO={fields['update_seconds']:.2f}s" + probability)
         elif event == "validation_started":
             label = f"Iteration {int(stage.split('_')[1]) + 1} [3/3]" if stage.startswith("cycle_") else stage
             self.label = label + " / 联合评价"
             self.write(f"{label} 联合策略评价中（不更新参数）")
         elif event == "validation_progress":
-            self.progress(self.label, fields["completed"], fields["total"])
+            self.progress(self.label + (" / 概率采样" if fields.get("mode") == "sampled" else " / 确定性"),
+                          fields["completed"], fields["total"])
         elif event == "validation_completed":
             label = f"Iteration {int(stage.split('_')[1]) + 1} 完成" if stage.startswith("cycle_") else stage + " 评价完成"
             service = fields["service"]
@@ -71,9 +75,12 @@ class ConsoleProgress:
             losses = " | ".join(f"{name}平均loss={self.losses[layer]:.5g}" for layer, name in
                                 (("upper", "服务器"), ("lower", "调度")) if self.losses.get(layer) is not None)
             timing = f" | 本轮耗时={time.perf_counter() - self.started:.2f}s" if stage.startswith("cycle_") and self.started is not None else ""
+            sampled = (f" | 采样reward/episode={fields['sampled_return_per_episode']:.6g}"
+                       f" | 采样成本/时隙={fields['sampled_cost_per_slot']:.6g}"
+                       if "sampled_return_per_episode" in fields else "")
             self.write(f"{label} | reward/episode={fields['return_per_episode']:.6g}"
                        f" | 成本/时隙={fields['cost_per_slot']:.6g} | 按时率={service_text}"
-                       + (" | " + losses if losses else "") + timing)
+                       + sampled + (" | " + losses if losses else "") + timing)
         elif event in ("training_started", "calibration_completed", "training_stopped", "training_completed"):
             self.write(format_event(event, fields))
 
@@ -140,9 +147,17 @@ class TrainingMonitor:
             names = ("raw_reward_per_slot", "training_reward_mean", "service", "energy", "cost", "joint_kl",
                      "explained_variance", "reward_scale", "reward_clipped_slots", "collection_seconds", "update_seconds")
             self.scalars("train/" + fields["layer"], {name: fields[name] for name in names}, fields["total_slots"])
+            if fields.get("activation_probability"):
+                self.scalars("train/upper/activation_probability", fields["activation_probability"], fields["total_slots"])
         elif event == "validation_completed":
             names = ("cost_per_slot", "return_per_episode", "service", "energy_per_slot", "validation_seconds")
             self.scalars("validation", {name: fields[name] for name in names}, fields["total_slots"])
+            self.scalars("validation_sampled", {name: value for name, value in fields.items()
+                                                if name.startswith("sampled_")}, fields["total_slots"])
+            if fields.get("stage", "").startswith("cycle_") or fields.get("stage") == "pretrain":
+                self.scalars("iteration/validation", {name: fields[name] for name in names}, fields["cycle_index"])
+                self.scalars("iteration/validation_sampled", {name: value for name, value in fields.items()
+                                                              if name.startswith("sampled_")}, fields["cycle_index"])
 
     def close(self):
         if self.writer is not None:

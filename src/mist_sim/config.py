@@ -59,6 +59,7 @@ def load_config(path, overlays=(), overrides=()):
     config.setdefault("ppo_layers", {"upper": {}, "lower": {}})
     config.setdefault("validation", {"min_service_rate": None, "selection": "best_feasible_cost"})
     config["validation"].setdefault("trajectories", 1)
+    config["validation"].setdefault("sampled", False)
     config.setdefault("checkpoint_policy", {"stage_interval": 0, "keep_stages": 2})
     config.setdefault("reward_normalization", {"enabled": False, "max_abs_slot_reward": 10.0})
     config.setdefault("monitoring", {"tensorboard": False, "console": True})
@@ -246,8 +247,10 @@ def validate(config):
         if key not in ("pretrain_slots", "fast_slots", "slow_intervals", "cycles", "calibration_episodes") or type(value) is not int:
             raise ValueError("Unknown/noninteger training count")
     validation = config.get("validation", {"min_service_rate": None, "selection": "best_feasible_cost"})
-    if set(validation) - {"min_service_rate", "selection", "trajectories"} or validation["selection"] != "best_feasible_cost":
+    if set(validation) - {"min_service_rate", "selection", "trajectories", "sampled"} or validation["selection"] != "best_feasible_cost":
         raise ValueError("Invalid validation selection")
+    if type(validation.get("sampled", False)) is not bool:
+        raise ValueError("validation.sampled must be boolean")
     if type(validation.get("trajectories", 1)) is not int or validation.get("trajectories", 1) < 1:
         raise ValueError("Validation trajectory count must be a positive integer")
     validation_seeds = [config["seeds"]["validation"] + 10000 * index for index in range(validation.get("trajectories", 1))]

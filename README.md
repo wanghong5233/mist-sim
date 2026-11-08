@@ -119,11 +119,11 @@ logs/runs/<运行名>/
 
 奖励是稠密的逐物理槽负成本，慢层累计控制区间奖励；rollout负责收集，不另外制造奖励。PPO loss是训练损失，固定开发集成本/按时率/能耗才是协议学习曲线的主要性能指标。
 
-iterations.csv保存原始reward总和/每物理槽均值、归一化训练reward、完整能耗、服务指标、实际epoch数及loss。loss是所有已执行小批次按样本数加权的均值；reward来自更新前新采样的环境，不是每个epoch产生一次。epoch重复优化同一批数据，不能将重复epoch当成独立奖励样本。固定开发集的return_per_episode更适合观察策略性能；episode原始回报另存，截断片段不冒充完整episode。结果图放results/<运行名>/figures/；跨运行图表按实验主题组织并注明输入CSV，检查报告不进results。
+iterations.csv保存原始reward总和/每物理槽均值、归一化训练reward、完整能耗、服务指标、实际epoch数及loss。loss是所有已执行小批次按样本数加权的均值；reward来自更新前新采样的环境，不是每个epoch产生一次。epoch重复优化同一批数据，不能将重复epoch当成独立奖励样本。validation.csv的cycle_index为完整交替轮次（预训练结束为0），iteration保留旧的组件更新计数用于兼容。确定性return_per_episode和sampled_return_per_episode分列，两者使用相同请求；采样评价使用独立且固定的动作随机种子并恢复训练RNG。best仍按确定性成本选择，未用随机评价替代部署口径。固定开发集的return_per_episode用于观察确定性策略性能；episode原始回报另存，截断片段不冒充完整episode。结果图放results/<运行名>/figures/；跨运行图表按实验主题组织并注明输入CSV，检查报告不进results。
 
-当前HPGI：128槽一个episode；每次快层rollout为1024个transition，慢层为256个区间transition（Q4时同为1024槽）；采样后最多遍历2个PPO epoch。epoch不包含新的episode，不是重新采样。配置总量8192预训练槽＋28次慢/快交替＝65536训练槽，校准/验证另计；`--dry-run`零采样显示实际方法的用量。
+当前HPGI：128槽一个episode；每次快层rollout为1024个transition，慢层为256个区间transition（Q4时同为1024槽）；采样后最多遍历5个PPO epoch。epoch不包含新的episode，不是重新采样。配置总量8192预训练槽＋28次慢/快交替＝65536训练槽，校准/验证另计；`--dry-run`零采样显示实际方法的用量。
 
-每个rollout使用新建on-policy buffer，保存状态、原动作前缀/掩码、旧联合logprob、价值、奖励、后继状态和终止/截断标志；更新时复算原动作概率，GAE处理bootstrap边界，更新后清空。当前minibatch=64，快层每epoch16批、慢层每epoch4批；2个epoch是可配置初值，不要求固定5–10次。KL超过0.03提前结束本次更新，下一次仍重新采样。
+每个rollout使用新建on-policy buffer，保存状态、原动作前缀/掩码、旧联合logprob、价值、奖励、后继状态和终止/截断标志；更新时复算原动作概率，GAE处理bootstrap边界，更新后清空。当前minibatch=64，快层每epoch16批、慢层每epoch4批；5个epoch是本次增加样本复用的试运行值，不是已调优结论。KL超过0.03提前结束本次更新，下一次仍重新采样。
 
 学习率采用固定3e-4、无学习率warmup和余弦衰减，dry-run显式显示该选择。当前小型Tanh PPO先保持固定学习率以便判断采样及更新效果，不将大模型训练技巧作为必需项。已有256槽统计校准（不更新网络）及8192槽全开快层预训练；两者都不是学习率warmup。若后续实验引入衰减，须同时固定上下层进度定义、恢复状态和公平比较配置，不能在训练中途静默修改。
 
@@ -135,7 +135,7 @@ conditional配置默认启用TensorBoard，合成测试默认关闭。打开曲�
 
 浏览器访问http://127.0.0.1:6006。`ppo/upper|lower`横轴为该层累计epoch，`train/*`和`validation/*`横轴为累计训练物理槽。重点看固定验证输入的原始回报、成本与服务率，再用loss/KL/熵/梯度排障；PPO loss不要求单调下降。训练奖励尺度变化单独记录，不与原始回报混用。
 
-training.cycles是最大轮数；支持验证平台早停和`--max-slots N`/`--max-seconds S`预算上限。conditional默认启用stopping.plateau：min_slots=16384后开始计数，固定验证集总成本相对改善超过min_relative_improvement=0.001才重置计数；连续patience=5次无有效改善停止整次训练。仅完整交替周期的验证计数，初始/预训练不计；首次符合最小训练量的验证建立参考值。以上是可调工程默认值，不是论文参数或数学收敛证明；比较实验应统一早停规则并报告实际交互量。已有服务门槛若不满足则不累计平台次数，没有新增服务阈值。
+training.cycles是最大轮数；支持验证平台早停和`--max-slots N`/`--max-seconds S`预算上限。conditional默认启用stopping.plateau：min_slots=32768后开始计数，同请求、固定动作种子的概率采样评价与确定性评价分别保存；任一模式成本相对自身参考值改善超过min_relative_improvement=0.001即重置计数，两者连续patience=8次都无有效改善才停止。此为停滞检测，不等于收敛判定。仅完整交替周期的验证计数，初始/预训练不计；首次符合最小训练量的验证建立参考值。以上是可调工程默认值，不是论文参数或数学收敛证明；比较实验应统一早停规则并报告实际交互量。已有服务门槛若不满足则不累计平台次数，没有新增服务阈值。
 
 平台停止标记stopped、原因为validation_plateau，保存final.pt/last.pt并保留best.pt与selection.json。耐心计数由检查点内完整验证历史恢复，重启或extra-cycles不会绕过已触发早停；early_stopping.json及progress记录参考成本和计数。关闭该机制用配置stopping.plateau.enabled=false开始新训练。交互上限在完整rollout前检查，时间上限在槽/小批边界检查；中途打断保存interrupted.pt供诊断，续训使用完成阶段last.pt。KL>.03只结束本批PPO更新，非有限损失/梯度标记failed。
 

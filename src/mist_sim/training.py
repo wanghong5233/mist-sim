@@ -126,6 +126,22 @@ class Trainer:
             self.event("validation_progress", completed=len(per_trajectory), total=len(self.validation_seeds()))
         return records, summarize(records), per_trajectory
 
+    def evaluate_sampled_validation(self):
+        """Paired requests and fixed action seeds; never advance training RNG."""
+        records, per_trajectory = [], []
+        seeds = self.validation_seeds()
+        with torch.random.fork_rng(devices=[]):
+            for seed in seeds:
+                self.check_budget()
+                torch.manual_seed(seed)
+                trace = generate_trace(self.config, seed)
+                trajectory, metrics = evaluate(self.controller, self.config, trace,
+                                               check_budget=self.check_budget, deterministic=False)
+                records.extend(trajectory)
+                per_trajectory.append(dict(seed=seed, action_seed=seed, metrics=metrics))
+                self.event("validation_progress", mode="sampled", completed=len(per_trajectory), total=len(seeds))
+        return records, summarize(records), per_trajectory
+
     def calibrate(self):
         if self.calibrated:
             return
@@ -329,6 +345,7 @@ class Trainer:
                 trim_snapshots(directory, "snapshot_*.pt", policy["keep_stages"])
         self.event("phase_completed", stage=name, layer=layer, service=metrics["on_time_rate"],
                    loss=metrics["loss"],
+                   activation_probability=metrics.get("activation_probability"),
                    energy=metrics["total_energy"], cost=metrics["conservative_cost"],
                    joint_kl=metrics["post_update_joint_kl"], frozen_unchanged=True,
                    raw_reward_per_slot=sum(record["reward"] for record in records) / len(records),
@@ -423,6 +440,26 @@ class Trainer:
                   "measured_seconds": time.perf_counter() - started,
                   "service_threshold": minimum, "service_requirement_specified": minimum is not None,
                   "eligible": service_ok, "selected": improved}
+        sampled_fields = {}
+        if self.config["validation"].get("sampled", False):
+            sampled_records, sampled_metrics, sampled_trajectories = self.evaluate_sampled_validation()
+            check_physics(self.config, sampled_records)
+            sampled_ok = minimum is None or (sampled_metrics["on_time_rate"] is not None
+                                              and sampled_metrics["on_time_rate"] >= minimum)
+            record.update(sampled_metrics=sampled_metrics, sampled_eligible=sampled_ok,
+                          sampled_trajectories=sampled_trajectories)
+            sampled_fields = dict(sampled_cost_per_slot=sampled_metrics["conservative_cost"] / len(sampled_records),
+                                  sampled_return_per_episode=sum(r["reward"] for r in sampled_records) / len(sampled_trajectories),
+                                  sampled_service=sampled_metrics["on_time_rate"],
+                                  sampled_active_servers=sampled_metrics["active_server_slots"] / len(sampled_records))
+            if self.store:
+                from .results import evaluation_row
+                self.store.write_json(f"traces/validation/{stage}_sampled.json", sampled_records)
+                for trajectory in sampled_trajectories:
+                    self.store.append_result("validation_sampled_trajectories.csv", dict(
+                        stage=stage, total_slots=self.total_slots, trajectory_seed=trajectory["seed"],
+                        action_seed=trajectory["action_seed"], **evaluation_row(trajectory["metrics"])))
+        record["measured_seconds"] = time.perf_counter() - started
         if improved:
             self.best_validation_cost, self.best_stage = metrics["conservative_cost"], stage
             self.best_checkpoint_path = str((self.store.path / "checkpoints" / f"selected_{stage}.pt").resolve()) if self.store else None
@@ -454,11 +491,12 @@ class Trainer:
                                   "service_requirement_specified": minimum is not None})
             self.save(self.store.path / "checkpoints" / "last.pt")
         self.event("validation_completed", iteration=len(self.history), stage=stage, service=metrics["on_time_rate"],
+                   cycle_index=int(stage.split("_")[1]) + 1 if stage.startswith("cycle_") else 0,
                    cost=metrics["conservative_cost"], eligible=service_ok, selected=improved,
                    cost_per_slot=metrics["conservative_cost"] / len(records),
                    return_per_episode=sum(record["reward"] for record in records) / len(per_trajectory),
                    energy_per_slot=metrics["total_energy"] / len(records),
-                   validation_seconds=record["measured_seconds"])
+                   validation_seconds=record["measured_seconds"], **sampled_fields)
 
     def save(self, path):
         path = Path(path)

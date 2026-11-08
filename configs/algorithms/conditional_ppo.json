@@ -6,16 +6,16 @@
   "long_term_feedback": true, "history_slots": 4,
   "ppo": {"hidden": 64, "learning_rate": 0.0003, "adam_epsilon": 0.00001,
     "clip": 0.2, "gae_lambda": 0.95, "gamma": 1, "max_grad_norm": 0.5,
-    "value_coefficient": 0.5, "entropy_coefficient": 0.01, "epochs": 2,
+    "value_coefficient": 0.5, "entropy_coefficient": 0.01, "epochs": 5,
     "minibatch": 64, "target_kl": 0.03},
   "training": {"pretrain_slots": 8192, "fast_slots": 1024, "slow_intervals": 256,
     "cycles": 28, "calibration_episodes": 2},
   "seeds": {"train": 4200001, "validation": 4300017, "test": 4400019},
   "device": "cpu", "ppo_layers": {"upper": {}, "lower": {}},
   "checkpoint_policy": {"stage_interval": 0, "keep_stages": 2},
-  "validation": {"min_service_rate": null, "selection": "best_feasible_cost", "trajectories": 12},
+  "validation": {"min_service_rate": null, "selection": "best_feasible_cost", "trajectories": 12, "sampled": true},
   "reward_normalization": {"enabled": true, "max_abs_slot_reward": 10.0},
   "monitoring": {"tensorboard": true, "console": true},
   "stopping": {"max_slots": null, "max_seconds": null,
-    "plateau": {"enabled": true, "patience": 5, "min_slots": 16384, "min_relative_improvement": 0.001}}
+    "plateau": {"enabled": true, "patience": 8, "min_slots": 32768, "min_relative_improvement": 0.001}}
 }

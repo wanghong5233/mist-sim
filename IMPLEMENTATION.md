@@ -32,7 +32,7 @@
 
 每层actor与critic编码器独立：items `19→64→64→64`，servers `13→64→64→64`，分别均值池化。actor拼接当前候选64、两组池化128、context11、prefix7：`210→64→64→1`；critic为`139→64→64→1`。每个MLP有两个Tanh隐藏层和线性输出。线性权重按[out,in]存放。每层actor 36,545、critic 32,001参数；两层合计137,092，FP32权重约0.523 MiB，不含优化器、激活及轨迹。
 
-当前H=8，上层联合开关空间2^8=256；快层每请求最多`2+8×4=34`候选，整批联合动作是条件选择的组合，容量掩码进一步缩小可行集合。共享编码器不枚举全部组合，参数量不随联合动作数指数增长。64宽保留为未调优起点；是否扩网须看充分训练后的价值误差、策略熵/KL及验证表现，不能由输入维数直接推导。
+当前H=8，上层联合开关空间2^8=256；快层每请求最多`2+8×4=34`候选，整批联合动作是条件选择的组合，容量掩码进一步缩小可行集合。共享编码器不枚举全部组合，参数量不随联合动作数指数增长。现有真实剖面运行最后一批中，任务层items行数4/68/340（最小/中位/最大），每槽请求4/19/29，每请求候选1/1/26；服务器层items为16/90/114。每个状态包含servers[8,13]、context[11]，每条件动作另含prefix[7]。64个任务层transition首批items实际合并为[4549,19]，候选评分输入[4549,210]、输出[4549,1]，critic输入[64,139]、输出[64,1]。这些是旧运行样本尺寸，非固定形状或总体最大值。状态包含连续资源/历史特征，不能把张量元素数当有限状态总数。64宽保留为未调优起点；是否扩网须看充分训练后的价值误差、策略熵/KL及验证表现，不能由输入维数直接推导。
 
 ## Reward、GAE与PPO
 
@@ -50,13 +50,13 @@ PPO的critic目标是**GAE lambda-return `A+V_old`**，不是完整Monte Carlo�
 
 当前条件配置为128槽episode、Q=4、8服务器/40终端、每终端每槽到达概率.5。一个请求内部选择不是一个transition；一整个批次动作才对应一个快层transition。episode是环境重置单位，rollout是本次采样集合，minibatch是一次梯度步的数据，epoch是遍历该rollout一次。
 
-|阶段|每次rollout|物理槽/完整episodes|minibatch=64，epochs≤2|
+|阶段|每次rollout|物理槽/完整episodes|minibatch=64，epochs≤5|
 |---|---|---|---|
-|快层预训练|1024个快层transition，共8次新采样更新|每次1024槽/8条|每epoch16批，最多32步|
-|交替快层|1024个快层transition|1024槽/8条|每epoch16批，最多32步|
-|交替慢层|256个区间transition|1024槽/8条|每epoch4批，最多8步|
+|快层预训练|1024个快层transition，共8次新采样更新|每次1024槽/8条|每epoch16批，最多80步|
+|交替快层|1024个快层transition|1024槽/8条|每epoch16批，最多80步|
+|交替慢层|256个区间transition|1024槽/8条|每epoch4批，最多20步|
 
-预训练总量8192按fast_slots分块，最后一块允许不足1024；块后更新再重新采样，恢复跳过完成块。之后28次慢/快交替，HPGI合计65536训练槽，校准/验证另计。这是可配置起点，不是已证明足够的训练量。相邻样本相关，不能当独立样本；预训练一大块8192只更新一次的旧节奏已替换。
+预训练总量8192按fast_slots分块，最后一块允许不足1024；块后更新再重新采样，恢复跳过完成块。之后28次慢/快交替，HPGI合计65536训练槽，校准/验证另计。保留128槽episode与每rollout八条完整轨迹：GAE有效记忆约20快槽/80慢层物理槽，128槽已覆盖多次Q4控制及唤醒；当前没有证据需缩短episode，缩短还会改变有限时域目标。只将PPO epoch由2增为5，上层每轮梯度步8→20、下层32→80，保留KL=.03保护、64宽、学习率和奖励。早停预热32768槽对应完成12个交替轮，耐心8轮，双模式评价避免argmax平台单独触发；这些仍是工程试运行值。相邻样本相关，不能当独立样本；预训练一大块8192只更新一次的旧节奏已替换。
 
 17槽episode的慢层持续长度为4/4/4/4/1。真实终止不bootstrap；采样截断使用正确下一观测和价值，GAE不跨重置。新collect从新episode开始，截断后未采样的后缀不补造。若horizon/Q/方法改变，物理交互预算必须重新核算：Q1、Always-On、仅慢层学习不能凭相同cycles宣称公平。
 
@@ -84,7 +84,7 @@ PPO更新通过`policies/batching.py`执行真正的小批张量前向/反向：
 
 `runtime.torch_threads`可配置CPU算子线程数，默认1；小网络串行采样与批量更新对线程数的收益不同，需按整条链路实测，不能用线程数推断并行效率。`scripts/validation/benchmark_batching.py`默认使用合成变长输入，也可传--behavior读取已有轨迹，只测量不写结果或更新权重。
 
-终端按完整交替轮次显示Iteration及三个步骤：服务器PPO、调度PPO、联合评价。采样、epoch和评价轨迹进度使用tqdm临时单行，结束清除；非交互输出省略进度条。每轮摘要记录联合评价原始平均episode回报、成本/时隙、按时率及两个组件各自的样本加权平均loss，不把两层loss合成整体目标。详细逐epoch诊断仍写stdout.log、progress.jsonl和TensorBoard；关闭writer后才计算文件哈希。既有CSV的iteration字段仍是组件更新计数，完整轮次应从stage的cycle编号加1取得；不改写历史结果。原始episode回报和固定验证回报不受归一化尺度影响；训练奖励/尺度/裁剪次数另列。具体命令、停止开关和目录说明只在README维护。
+终端按完整交替轮次显示Iteration及三个步骤：服务器PPO、调度PPO、联合评价。采样、epoch和评价轨迹进度使用tqdm临时单行，结束清除；非交互输出省略进度条。每轮摘要记录联合评价原始平均episode回报、成本/时隙、按时率及两个组件各自的样本加权平均loss，不把两层loss合成整体目标。详细逐epoch诊断仍写stdout.log、progress.jsonl和TensorBoard；关闭writer后才计算文件哈希。CSV的iteration字段保留组件更新计数，新validation.csv显式增加cycle_index表示完整轮次；确定性与固定种子概率采样reward分列，两者都停滞才累计早停耐心，不改写历史结果。原始episode回报和固定验证回报不受归一化尺度影响；训练奖励/尺度/裁剪次数另列。具体命令、停止开关和目录说明只在README维护。
 
 - [CleanRL PPO](https://github.com/vwxyzjn/cleanrl/blob/fe8d8a03c41a7ef5b523e2e354bd01c363e786bb/cleanrl/ppo.py)：fe8d8a03c41a7ef5b523e2e354bd01c363e786bb，MIT；正交初始化、Adam、GAE、clip/KL/梯度经验参考，没有复制源码文件。
 - [SB3](https://github.com/DLR-RM/stable-baselines3/tree/0cdcd200deef06b9ad0af72f6ddfb07c06c6df39)：MIT；终止/截断、种子与评价核对。[MaskablePPO](https://github.com/Stable-Baselines-Team/stable-baselines3-contrib/tree/a8af63682070df0bda9707400b2e971055600910)：MIT；掩码语义核对，不调用其learn。

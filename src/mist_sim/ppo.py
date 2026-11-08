@@ -150,5 +150,9 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
     output["training_reward_signs"] = {"positive": sum(sample["reward"] > 0 for sample in buffer.samples),
                                        "negative": sum(sample["reward"] < 0 for sample in buffer.samples),
                                        "zero": sum(sample["reward"] == 0 for sample in buffer.samples)}
+    activation_probabilities = [p for sample in buffer.samples for p in sample.get("activation_probabilities", [])]
+    if activation_probabilities:
+        output["activation_probability"] = dict(mean=float(np.mean(activation_probabilities)),
+                                                min=min(activation_probabilities), max=max(activation_probabilities))
     buffer.clear()
     return output
