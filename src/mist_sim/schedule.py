@@ -8,6 +8,26 @@ class TrainingLimit(TimeoutError):
         super().__init__(reason)
 
 
+def plateau_status(history, settings):
+    """Reconstruct patience from checkpointed validation history, never training loss."""
+    best, bad, stopped = None, 0, False
+    for record in history:
+        if not record["stage"].startswith("cycle_") or record["total_slots"] < settings["min_slots"]:
+            continue
+        cost = record["metrics"]["conservative_cost"]
+        if not record["eligible"] or not math.isfinite(cost):
+            best, bad = None, 0
+            continue
+        if best is None or best - cost > settings["min_relative_improvement"] * max(abs(best), 1e-12):
+            best, bad = cost, 0
+        else:
+            bad += 1
+        if settings["enabled"] and bad >= settings["patience"]:
+            stopped = True
+            break
+    return {"stop": stopped, "bad_checks": bad, "reference_cost": best}
+
+
 def rollout_slots(config, layer, count):
     if layer == "lower":
         return count
