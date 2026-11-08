@@ -11,6 +11,7 @@ from pathlib import Path
 import torch
 from mist_sim.policies.networks import SetPolicy
 from mist_sim.policies.batching import replay_batch
+from mist_sim.traces import read_behavior
 
 
 def main():
@@ -23,7 +24,7 @@ def main():
     torch.manual_seed(71)
     policy = SetPolicy(64)
     if args.behavior:
-        samples = json.loads(args.behavior.read_text(encoding="utf-8"))[:args.samples]
+        samples = read_behavior(args.behavior)[:args.samples]
     else:
         samples = []
         for i in range(args.samples):

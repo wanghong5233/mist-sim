@@ -44,9 +44,9 @@ def evaluate(controller, config, trace, measured_latency=False, check_budget=Non
             check_budget()
         started = time.perf_counter()
         if environment.slot % config["window"] == 0:
-            active, _ = controller.slow(environment.upper_observation(), deterministic=True)
+            active, _ = controller.slow(environment.upper_observation(), deterministic=True, record=False)
         problem = environment.begin_slot(active)
-        actions, predicted, _ = controller.fast(problem, deterministic=True)
+        actions, predicted, _ = controller.fast(problem, deterministic=True, record=False)
         elapsed = time.perf_counter() - started
         record = environment.execute(actions, predicted, elapsed if measured_latency else 0.0, measured_latency)
         record["measured_policy_seconds"] = elapsed

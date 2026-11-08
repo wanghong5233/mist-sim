@@ -14,6 +14,7 @@ from .evaluation import evaluate, summarize
 from .policies.hpgi import Controller
 from .policies.networks import upper_frame, lower_frame
 from .ppo import update
+from .traces import pack_behavior
 from .policies.batching import replay_chunks
 from .config import validate, layer_settings
 from .storage import digest_file
@@ -161,28 +162,30 @@ class Trainer:
         environment = self.fresh_environment()
         active = list(self.config["initial_active"])
         problem = None
+        cached = None
         while len(buffer.samples) < count:
             self.check_budget()
             if environment.done:
                 environment = self.fresh_environment()
                 problem = None
+                cached = None
             episode_id, start_slot = self.trace_counter, environment.slot
             if layer == "upper":
                 observation = environment.upper_observation()
-                active, sample = self.controller.slow(observation, pretrain=pretrain)
+                active, sample = self.controller.slow(observation, pretrain=pretrain, cached=cached)
                 if sample is None:
                     raise RuntimeError("No learned upper policy")
                 interval_records = []
                 for _ in range(min(self.config["window"], self.config["horizon"] - environment.slot)):
                     self.check_budget()
                     problem = environment.begin_slot(active)
-                    actions, predicted, _ = self.controller.fast(problem)
+                    actions, predicted, _ = self.controller.fast(problem, record=False)
                     interval_records.append(environment.execute(actions, predicted))
                     self.total_slots += 1
                 duration = len(interval_records)
                 reward = sum(self.config["ppo"]["gamma"] ** offset * training_reward(record, units)
                              for offset, record in enumerate(interval_records))
-                next_frame = upper_frame(environment.upper_observation())
+                next_frame = None if environment.done else upper_frame(environment.upper_observation())
                 with torch.no_grad():
                     next_value = 0.0 if environment.done else float(self.controller.upper.value(next_frame))
                 buffer.append(sample, reward, next_value, environment.done,
@@ -192,9 +195,9 @@ class Trainer:
             else:
                 if problem is None:
                     if environment.slot % self.config["window"] == 0:
-                        active, _ = self.controller.slow(environment.upper_observation(), pretrain=pretrain)
+                        active, _ = self.controller.slow(environment.upper_observation(), pretrain=pretrain, record=False)
                     problem = environment.begin_slot(active)
-                actions, predicted, sample = self.controller.fast(problem)
+                actions, predicted, sample = self.controller.fast(problem, cached=cached)
                 if sample is None:
                     raise RuntimeError("No learned lower policy")
                 record = environment.execute(actions, predicted)
@@ -205,7 +208,7 @@ class Trainer:
                     problem = None
                 else:
                     if environment.slot % self.config["window"] == 0:
-                        active, _ = self.controller.slow(environment.upper_observation(), pretrain=pretrain)
+                        active, _ = self.controller.slow(environment.upper_observation(), pretrain=pretrain, record=False)
                     problem = environment.begin_slot(active)
                     next_frame = lower_frame(problem)
                     with torch.no_grad():
@@ -213,6 +216,7 @@ class Trainer:
                 buffer.append(sample, training_reward(record, units), next_value, environment.done,
                               not environment.done and len(buffer.samples) + 1 == count, 1, next_frame)
                 buffer.samples[-1]["physical_rewards"] = [record["reward"]]
+            cached = None if environment.done else (next_frame, next_value)
             buffer.samples[-1]["reward_scale"] = units["scale"]
             buffer.samples[-1]["reward_clip"] = units["clip"]
             buffer.samples[-1]["episode_id"] = episode_id
@@ -258,7 +262,7 @@ class Trainer:
             diagnostics_seconds = time.perf_counter() - diagnostics_started
             trace_started = time.perf_counter()
             if self.store:
-                self.store.write_json(f"traces/phases/{name}/behavior.json", buffer.samples)
+                self.store.write_json(f"traces/phases/{name}/behavior.json", pack_behavior(buffer.samples))
                 self.store.write_json(f"traces/phases/{name}/inputs.json", input_diagnostics)
                 self.store.write_json(f"traces/phases/{name}/rollout.json", rollout)
             self.event("rollout_ready", stage=name, layer=layer, rollout=rollout)
@@ -308,7 +312,9 @@ class Trainer:
                        frozen_unchanged=True, parameters_changed=parameter_hash(policy) != before, versions=dict(self.versions),
                        total_slots=self.total_slots, **diagnostics, **summarize(records))
         self.completed_stages.append(name)
-        self.history.append(metrics)
+        self.history.append({key: value for key, value in metrics.items()
+                             if key not in ("input_diagnostics", "rollout", "durations")} |
+                            {"rollout": {key: value for key, value in rollout.items() if key != "examples"}})
         self.reward_normalizer.observe(records)
         self.phase_in_progress = False
         if self.store:

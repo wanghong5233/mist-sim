@@ -2,7 +2,7 @@
 import numpy as np
 import torch
 import time
-from .policies.batching import replay_batch, replay_chunks, values_batch
+from .policies.batching import replay_batch, replay_chunks, values_batch, RolloutTensors
 
 
 def clip_policy_gradients(policy, limit):
@@ -46,6 +46,11 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
                      returns=returns.tolist(), minibatches=[], epoch_checks=[],
                      td_errors=[sample["reward"] + config["gamma"] ** sample["duration"] * sample["next_value"] *
                                 (not sample["terminated"]) - sample["value"] for sample in buffer.samples])
+    input_cache = RolloutTensors(policy, buffer.samples)
+    old_all = torch.tensor([sample["logprob"] for sample in buffer.samples])
+    advantages_all = torch.tensor(advantages, dtype=torch.float32)
+    targets_all = torch.tensor(returns, dtype=torch.float32)
+    valid_all = torch.tensor([bool(sample["steps"]) for sample in buffer.samples])
     diagnostics = []
     timings = dict(forward_loss_seconds=0.0, backward_step_seconds=0.0, kl_check_seconds=0.0)
     sample_count = len(buffer.samples)
@@ -60,11 +65,11 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
                 check_budget()
             indices = permutation[offset:offset + config["minibatch"]]
             forward_started = time.perf_counter()
-            logprob, entropy, values = replay_batch(policy, [buffer.samples[index] for index in indices])
-            old = torch.tensor([buffer.samples[index]["logprob"] for index in indices])
-            advantage = torch.tensor(advantages[indices], dtype=torch.float32)
-            target = torch.tensor(returns[indices], dtype=torch.float32)
-            actor_valid = torch.tensor([bool(buffer.samples[index]["steps"]) for index in indices])
+            logprob, entropy, values = replay_batch(policy, [buffer.samples[index] for index in indices], cache=input_cache)
+            old = old_all[indices]
+            advantage = advantages_all[indices]
+            target = targets_all[indices]
+            actor_valid = valid_all[indices]
             loss, actor_loss, value_loss, entropy_loss, ratio, logratio = loss_terms(
                 logprob, old, advantage, values, target, entropy, actor_valid, config)
             if not torch.isfinite(loss):
@@ -95,8 +100,8 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
                                     "gradient_norm": float(gradient), **gradient_groups})
         kl_started = time.perf_counter()
         with torch.no_grad():
-            updated_logprob = replay_chunks(policy, buffer.samples, config["minibatch"])
-            old_logprob = torch.tensor([sample["logprob"] for sample in buffer.samples])
+            updated_logprob = replay_chunks(policy, buffer.samples, config["minibatch"], input_cache)
+            old_logprob = old_all
             joint_logratio = updated_logprob - old_logprob
             post_kl = float((torch.expm1(joint_logratio.double()) - joint_logratio.double()).mean())
         timings["kl_check_seconds"] += time.perf_counter() - kl_started
@@ -116,7 +121,7 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
         if post_kl > config["target_kl"]:
             break
     with torch.no_grad():
-        final_values = torch.cat([values_batch(policy, buffer.samples[start:start + config["minibatch"]])
+        final_values = torch.cat([values_batch(policy, buffer.samples[start:start + config["minibatch"]], input_cache)
                                   for start in range(0, sample_count, config["minibatch"])]).cpu().numpy()
     variance = float(np.var(returns))
     explained = None if variance <= 1e-12 else float(1 - np.var(returns - final_values) / variance)

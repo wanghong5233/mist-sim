@@ -199,7 +199,8 @@ def test_update_logs_forward_gae_physics_and_tampering(config, tmp_path):
         trainer.calibrate()
         for stage, layer, count in (("upper_check", "upper", 3), ("lower_check", "lower", 7)):
             trainer.phase(stage, layer, count)
-            samples = json.loads((store.path / "traces/phases" / stage / "behavior.json").read_text(encoding="utf-8"))
+            from mist_sim.traces import read_behavior
+            samples = read_behavior(store.path / "traces/phases" / stage / "behavior.json")
             audit = json.loads((store.path / "traces/phases" / stage / "update.json").read_text(encoding="utf-8"))
             records = json.loads((store.path / "traces/phases" / stage / "physical.json").read_text(encoding="utf-8"))
             check_update(samples, audit)

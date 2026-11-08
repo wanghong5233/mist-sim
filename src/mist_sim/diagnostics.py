@@ -260,7 +260,8 @@ def inspect_run(path):
     updates = list((path / "traces").glob("*_update.json")) + list((path / "traces/phases").glob("*/update.json"))
     for update_path in sorted(updates):
         stem = update_path.parent.name if update_path.name == "update.json" else update_path.name.removesuffix("_update.json")
-        samples = json.loads(phase_trace_path(path, stem, "behavior").read_text(encoding="utf-8"))
+        from .traces import read_behavior
+        samples = read_behavior(phase_trace_path(path, stem, "behavior"))
         audit = json.loads(update_path.read_text(encoding="utf-8"))
         result["updates"].append(dict(stage=stem, **check_update(samples, audit)))
     for records_path in sorted((path / "traces").rglob("*.json")):

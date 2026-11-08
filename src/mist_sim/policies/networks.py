@@ -181,8 +181,8 @@ class SetPolicy(nn.Module):
         return logprob, entropy, self.value(sample["frame"])
 
     @torch.no_grad()
-    def upper_action(self, observation, deterministic=False):
-        frame = upper_frame(observation)
+    def upper_action(self, observation, deterministic=False, record=True, cached=None):
+        frame = cached[0] if cached is not None else upper_frame(observation)
         pooled_items, _, context = self.encode(frame)
         logprob = torch.zeros(())
         actions, steps = [], []
@@ -197,18 +197,22 @@ class SetPolicy(nn.Module):
             prefix = [index, sum(actions), sum(actions) / max(1, index), 0, 0, 0, 0]
             distribution, _ = self.distribution(encoding, features, prefix, [True, True])
             action = int(distribution.probs.argmax() if deterministic else distribution.sample())
-            steps.append({"features": features, "prefix": prefix, "mask": [True, True], "action": action,
-                          "prefix_frame": prefix_frame})
+            if record:
+                steps.append({"features": features, "prefix": prefix, "mask": [True, True], "action": action,
+                              "prefix_frame": prefix_frame})
             actions.append(action)
-            logprob = logprob + distribution.log_prob(torch.tensor(action))
+            if record:
+                logprob = logprob + distribution.log_prob(torch.tensor(action))
+        if not record:
+            return actions, None
         sample = {"frame": frame, "steps": steps, "actions": actions}
-        value = self.value(frame)
+        value = cached[1] if cached is not None else self.value(frame)
         sample.update(logprob=float(logprob), value=float(value))
         return actions, sample
 
     @torch.no_grad()
-    def lower_action(self, problem, deterministic=False):
-        frame = lower_frame(problem)
+    def lower_action(self, problem, deterministic=False, record=True, cached=None):
+        frame = cached[0] if cached is not None else lower_frame(problem)
         encoding = self.encode(frame)
         usage = problem.empty_usage()
         actions, steps, predicted = [], [], []
@@ -230,24 +234,29 @@ class SetPolicy(nn.Module):
             distribution, combined = self.distribution(encoding, features, prefix, mask)
             action = int(distribution.probs.argmax() if deterministic else distribution.sample())
             choice = options[action]
-            logprob = logprob + distribution.log_prob(torch.tensor(action))
-            step = {"features": features, "prefix": prefix, "mask": mask, "action": action}
+            if record:
+                logprob = logprob + distribution.log_prob(torch.tensor(action))
+            step = {"features": features, "prefix": prefix, "mask": mask, "action": action} if record else None
             rate = 0.0
             if self.learned_rates and choice["kind"] == "edge":
                 mean = self.rate_head(combined[action]).squeeze()
                 normal = Normal(mean, self.rate_log_std.exp())
                 latent = mean if deterministic else normal.sample()
-                step["rate_latent"] = float(latent)
-                logprob = logprob + normal.log_prob(latent)
+                if record:
+                    step["rate_latent"] = float(latent)
+                    logprob = logprob + normal.log_prob(latent)
                 rate = float(torch.sigmoid(latent)) * problem.config["servers"][choice["server"]]["capacity"]
             predicted.append(rate)
             actions.append(action)
-            steps.append(step)
+            if record:
+                steps.append(step)
             problem.reserve(choice, usage)
             edge_count += choice["kind"] == "edge"
             local_count += choice["kind"] == "local"
+        if not record:
+            return actions, predicted if self.learned_rates else None, None
         sample = {"frame": frame, "steps": steps, "actions": actions,
                   "order": [item["id"] for item in problem.public], "predicted_rates": predicted if self.learned_rates else None}
-        value = self.value(frame)
+        value = cached[1] if cached is not None else self.value(frame)
         sample.update(logprob=float(logprob), value=float(value))
         return actions, sample["predicted_rates"], sample

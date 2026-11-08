@@ -84,7 +84,9 @@ def main():
                 minibatches=sum(item["minibatches"] for item in diagnostics["updates"]),
                 physical_records=sum(item["slots"] for item in diagnostics["physics"]),
                 edge_assignments_checked=sum(item["edge_assignments"] for item in diagnostics["physics"]),
-                stages=[{key: row[key] for key in fields} for row in trainer.history],
+                stages=[{key: row[key] for key in fields}
+                        for row in (json.loads(line) for line in
+                                    (store.path / "metrics.jsonl").read_text(encoding="utf-8").splitlines())],
                 validation=[{key: row[key] for key in ("stage", "total_slots", "metrics", "service_threshold")}
                             for row in trainer.validation_history],
                 final_deterministic_metrics=metrics,

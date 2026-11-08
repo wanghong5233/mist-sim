@@ -16,17 +16,17 @@ class Controller:
         self.upper = SetPolicy(layer_settings(config, "upper")["hidden"])
         self.lower = SetPolicy(layer_settings(config, "lower")["hidden"], config["learned_rates"])
 
-    def slow(self, observation, deterministic=False, pretrain=False):
+    def slow(self, observation, deterministic=False, pretrain=False, record=True, cached=None):
         if pretrain or self.method == "always_on":
             return [1] * len(self.config["servers"]), None
         if self.method == "greedy_consolidation":
             return greedy_slow(observation), None
-        return self.upper.upper_action(observation, deterministic)
+        return self.upper.upper_action(observation, deterministic, record=record, cached=cached)
 
-    def fast(self, problem, deterministic=False):
+    def fast(self, problem, deterministic=False, record=True, cached=None):
         if not self.learn_lower:
             return greedy_fast(problem)
-        return self.lower.lower_action(problem, deterministic)
+        return self.lower.lower_action(problem, deterministic, record=record, cached=cached)
 
     def state_dict(self):
         return {"upper": self.upper.state_dict(), "lower": self.lower.state_dict()}

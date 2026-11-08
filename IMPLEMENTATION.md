@@ -72,7 +72,9 @@ PPO的critic目标是**GAE lambda-return `A+V_old`**，不是完整Monte Carlo�
 
 效率检查边界：候选生成只在单个请求调用内复用与服务器无关的切分剖面，不做跨配置持久缓存；执行只检查选中候选，按服务器一次分组，空组跳过P3；贪心复用已知当前成本，仍比较完整P3增量成本。文件哈希以1MiB分块读取，避免把整份轨迹装入内存。`tests/test_static_efficiency.py`以调用次数、动作一致性和哈希检查这些性质，不以墙钟阈值作为测试。
 
-仍存在的效率边界：评价及冻结对手采样沿用完整训练采样接口，会计算未使用的critic并构造动作记录；采样计算后继价值后，下一步又计算该状态价值；批量更新每个epoch仍重新打包Python观测；behavior包含完整前后观测/前缀，history及检查点随阶段增长，紧凑JSON仍会构造完整序列化字符串。这些属于明确的优化候选，尚未实施或计时，不等同于结果错误。后续应分别用动作/随机状态、终止/截断、梯度及重放/恢复等价核验，不能为了加速直接删诊断或改变信息边界。环境时序、容量前缀、GAE递推和P3二分的循环有算法依赖，不能仅凭存在Python循环判错。
+评价和冻结层使用`record=False`动作路径，跳过critic及训练记录；采样在同一rollout内复用已算出的后继frame/value，重置时清空缓存。PPO的`RolloutTensors`只缓存原始输入、掩码及已选动作张量，跨epoch复用；网络激活仍逐次重算，缓存随本次更新释放。环境时序、容量前缀、GAE递推和P3二分保留必要顺序。
+
+behavior采用`mist.behavior.shared.v1`共享frame/特征组格式，避免重复展开相邻观测与上层前缀；统一通过`traces.read_behavior`还原，兼容旧JSON列表。JSON采用缓冲流式写入临时文件后原子替换，不构造完整输出字符串；失败保留上一个完整文件。检查点history仅存每阶段标量及短摘要，不再携带输入诊断、逐槽duration和transition例子，完整证据各存于原诊断文件。恢复仍保存完整优化器、归一化器、随机状态与选择历史，原始结果CSV不变。
 
 先看resolved_config和progress阶段；`traces/phases/<阶段>/`内rollout.json给出样本/物理槽/episode/小批次数及代表transition，behavior.json保存完整观测/前缀/掩码，inputs.json给出输入与网络诊断，update.json保存TD/GAE/loss/梯度，physical.json保存执行。`inspect_logs.py`兼容新旧目录并独立复算；`check_rollouts.py`只采样核验。
 

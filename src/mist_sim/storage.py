@@ -43,7 +43,14 @@ def validation_trace_path(run, stage):
 def write_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False), encoding="utf-8")
+    temporary = path.with_name(path.name + ".partial")
+    try:
+        with temporary.open("w", encoding="utf-8", buffering=1024 * 1024) as stream:
+            json.dump(value, stream, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+        temporary.replace(path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 
 def source_identity(root):

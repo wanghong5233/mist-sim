@@ -26,7 +26,8 @@ def initial_gradient_balance(run):
         if not update_path.exists():
             continue
         audit = read_json(update_path)
-        samples = read_json(phase_trace_path(run, stage, "behavior"))
+        from mist_sim.traces import read_behavior
+        samples = read_behavior(phase_trace_path(run, stage, "behavior"))
         indices = audit["minibatches"][0]["indices"]
         policy = getattr(trainer.controller, layer)
         replayed = [policy.replay(samples[index]) for index in indices]
