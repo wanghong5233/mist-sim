@@ -21,6 +21,7 @@ from .storage import digest_file
 from .checkpoints import trim_snapshots
 from .rewards import training_reward, RunningRewardNormalizer
 from .schedule import TrainingLimit, rollout_slots, describe_schedule
+from .convergence import DEFAULT_CONVERGENCE, reward_stability
 
 CHECKPOINT_SCHEMA = 2
 
@@ -86,6 +87,11 @@ class Trainer:
         self.max_slots = None
         self.epoch_counts = {"upper": 0, "lower": 0}
         self.training_episodes = 0
+        self.stop_reason = None
+
+    @property
+    def minimal_checkpoints(self):
+        return self.config.get("checkpoint_policy", {}).get("mode", "full") == "minimal"
 
     def check_budget(self):
         if self.deadline is not None and time.perf_counter() >= self.deadline:
@@ -109,6 +115,7 @@ class Trainer:
         trace = generate_trace(self.config, trace_seed)
         if self.store:
             self.store.write_json(f"traces/inputs/input_{self.trace_counter:05d}.json", {"seed": trace_seed, "trace": trace})
+            self.store.record_input_seed(self.trace_counter, trace_seed)
         return Environment(self.config, trace)
 
     def validation_seeds(self):
@@ -256,7 +263,7 @@ class Trainer:
         if self.max_slots is not None and self.total_slots + rollout_slots(self.config, layer, count) > self.max_slots:
             raise TrainingLimit("interaction_limit_before_next_rollout")
         self.check_budget()
-        if self.store:
+        if self.store and not self.minimal_checkpoints:
             self.save(self.store.path / "checkpoints" / "last.pt")
         self.phase_in_progress = True
         opponent = "lower" if layer == "upper" else "upper"
@@ -337,12 +344,14 @@ class Trainer:
         if self.store:
             self.store.write_json(f"traces/phases/{name}/physical.json", records)
             self.store.append_metrics(metrics)
-            self.save(self.store.path / "checkpoints" / "last.pt")
+            if not self.minimal_checkpoints:
+                self.save(self.store.path / "checkpoints" / "last.pt")
             policy = self.config.get("checkpoint_policy", {"stage_interval": 0, "keep_stages": 2})
             if policy["stage_interval"] and len(self.completed_stages) % policy["stage_interval"] == 0:
                 directory = self.store.path / "checkpoints"
                 self.save(directory / f"snapshot_{name}.pt")
                 trim_snapshots(directory, "snapshot_*.pt", policy["keep_stages"])
+            self.store.retain_traces("phases", self.completed_stages)
         self.event("phase_completed", stage=name, layer=layer, service=metrics["on_time_rate"],
                    loss=metrics["loss"],
                    activation_probability=metrics.get("activation_probability"),
@@ -376,7 +385,7 @@ class Trainer:
             self.save(self.store.path / "checkpoints" / "last.pt")
         self.calibrate()
         self.event("calibration_completed", episodes=self.config["training"]["calibration_episodes"])
-        if self.store and not self.completed_stages:
+        if self.store and not self.completed_stages and not self.minimal_checkpoints:
             self.save(self.store.path / "checkpoints" / "initial.pt")
         if not self.validation_history:
             self.validate_cycle("initial")
@@ -392,7 +401,11 @@ class Trainer:
             self.validate_cycle("pretrain")
         finished_cycles = sum(item["stage"].startswith("cycle_") for item in self.validation_history)
         target = max(self.config["training"]["cycles"], finished_cycles) + extra_cycles
+        self.stop_reason = "configured_cycles_completed"
         for cycle in range(target):
+            if self.validation_history[-1].get("convergence", {}).get("stop", False):
+                self.stop_reason = "reward_stable"
+                break
             for layer, enabled, count in (
                 ("upper", self.controller.learn_upper, self.config["training"]["slow_intervals"]),
                 ("lower", self.controller.learn_lower, self.config["training"]["fast_slots"])):
@@ -402,13 +415,16 @@ class Trainer:
             validation_stage = f"cycle_{cycle:03d}"
             if validation_stage not in [item["stage"] for item in self.validation_history]:
                 self.validate_cycle(validation_stage)
+            if self.validation_history[-1].get("convergence", {}).get("stop", False):
+                self.stop_reason = "reward_stable"
+                break
         records, metrics, per_trajectory = self.evaluate_validation()
         if self.store:
             self.store.write_json("traces/validation/final.json", records)
             self.store.write_json("validation_metrics.json", metrics)
             self.store.write_json("validation_trajectories.json", per_trajectory)
-            self.save(self.store.path / "checkpoints" / "final.pt")
-        self.event("training_completed", reason="configured_cycles_completed")
+            self.save(self.store.path / "checkpoints" / ("last.pt" if self.minimal_checkpoints else "final.pt"))
+        self.event("training_completed", reason=self.stop_reason)
         return self.history
 
     def validate_cycle(self, stage):
@@ -447,8 +463,10 @@ class Trainer:
         record["measured_seconds"] = time.perf_counter() - started
         if improved:
             self.best_validation_cost, self.best_stage = metrics["conservative_cost"], stage
-            self.best_checkpoint_path = str((self.store.path / "checkpoints" / f"selected_{stage}.pt").resolve()) if self.store else None
+            self.best_checkpoint_path = str((self.store.path / "checkpoints" / f"selected_{stage}.pt").resolve()) if self.store and not self.minimal_checkpoints else None
         self.validation_history.append(record)
+        record["convergence"] = reward_stability(self.validation_history,
+            self.config.get("convergence", DEFAULT_CONVERGENCE), self.config["horizon"])
         if self.store:
             self.store.write_json(f"traces/validation/{stage}.json", records)
             self.store.write_json("validation_history.json", self.validation_history)
@@ -457,7 +475,7 @@ class Trainer:
                 self.store.append_result("validation_trajectories.csv", dict(
                     iteration=len(self.history), stage=stage, total_slots=self.total_slots,
                     trajectory_seed=trajectory["seed"], **evaluation_row(trajectory["metrics"])))
-            if improved:
+            if improved and not self.minimal_checkpoints:
                 self.save(self.best_checkpoint_path)
                 self.save(self.store.path / "checkpoints" / "best.pt")
                 directory = self.store.path / "checkpoints"
@@ -469,12 +487,16 @@ class Trainer:
                 trim_snapshots(directory, "selected_*.pt", len(set(protected)), protected)
             selected_path = Path(self.best_checkpoint_path) if self.best_checkpoint_path else None
             self.store.write_json("selection.json", {"best_stage": self.best_stage,
-                                  "status": "selected" if self.best_stage else "no_eligible_checkpoint",
+                                  "status": ("metrics_only" if self.minimal_checkpoints else "selected") if self.best_stage else "no_eligible_checkpoint",
                                   "checkpoint_path": self.best_checkpoint_path,
                                   "checkpoint_available": selected_path is not None and selected_path.is_file(),
                                   "checkpoint_sha256": digest_file(selected_path) if selected_path is not None and selected_path.is_file() else None,
                                   "service_requirement_specified": minimum is not None})
-            self.save(self.store.path / "checkpoints" / "last.pt")
+            interval = self.config.get("checkpoint_policy", {}).get("cycle_interval", 250)
+            if not self.minimal_checkpoints or stage == "pretrain" or (
+                    stage.startswith("cycle_") and (int(stage.split("_")[1]) + 1) % interval == 0):
+                self.save(self.store.path / "checkpoints" / "last.pt")
+            self.store.retain_traces("validations", [item["stage"] for item in self.validation_history])
         self.event("validation_completed", iteration=len(self.history), stage=stage, service=metrics["on_time_rate"],
                    cycle_index=int(stage.split("_")[1]) + 1 if stage.startswith("cycle_") else 0,
                    cost=metrics["conservative_cost"], eligible=service_ok, selected=improved,
@@ -482,6 +504,15 @@ class Trainer:
                    return_per_episode=sum(record["reward"] for record in records) / len(per_trajectory),
                    energy_per_slot=metrics["total_energy"] / len(records),
                    validation_seconds=record["measured_seconds"], **sampled_fields)
+        if stage.startswith("cycle_") and record["convergence"]["enabled"]:
+            stability = record["convergence"]
+            if self.store:
+                row = {key: value for key, value in stability.items() if key != "modes"}
+                for mode in ("metrics", "sampled_metrics"):
+                    for key in ("reward_mean", "relative_mean_change", "relative_trend", "relative_std"):
+                        row[f"{mode}_{key}"] = stability["modes"].get(mode, {}).get(key)
+                self.store.append_result("convergence.csv", dict(stage=stage, **row))
+            self.event("convergence_checked", stage=stage, **stability)
 
     def save(self, path):
         path = Path(path)

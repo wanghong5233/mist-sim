@@ -129,7 +129,7 @@ def policy_input_diagnostics(policy, samples, limit=16):
                  "context": [policy.context_norm.mean.numel()], "prefix": [policy.prefix_norm.mean.numel()],
                  "decision_candidate_rows": [min(candidate_counts), max(candidate_counts)] if candidate_counts else [0, 0]},
         linear_layers=linear_layers, parameter_count=sum(parameter.numel() for parameter in policy.parameters()),
-        tanh_saturation={name: counts[1] / counts[0] for name, counts in activations.items()},
+        tanh_saturation={name: counts[1] / counts[0] if counts[0] else None for name, counts in activations.items()},
         decisions=len(decisions), forced_decisions=sum(sum(step["mask"]) == 1 for step in decisions),
         legal_candidates=sum(sum(step["mask"]) for step in decisions),
         masked_candidates=sum(len(step["mask"]) - sum(step["mask"]) for step in decisions),

@@ -38,7 +38,8 @@ def describe_schedule(config, extra_cycles=0):
                               "minibatches_per_epoch": math.ceil(count / settings["minibatch"]),
                               "target_kl": settings["target_kl"]}
                     for layer, count, settings in _layers(config, lower, upper)},
-            "convergence_rule": "No loss-based stopping; inspect fixed-validation return, cost and service"}
+            "convergence_rule": config.get("convergence", {"enabled": False}),
+            "checkpoint_policy": config.get("checkpoint_policy", {})}
 
 
 def _layers(config, lower, upper):

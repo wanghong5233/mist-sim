@@ -124,7 +124,8 @@ def run_command(args, config, trainer):
                 trainer.store = store
             trainer.run(args.extra_cycles, max_seconds=args.max_seconds, max_slots=args.max_slots)
             store.write_json("summary.json", {"stages": trainer.completed_stages, "total_slots": trainer.total_slots,
-                                              "stop_reason": "configured_cycles_completed"})
+                                              "stop_reason": trainer.stop_reason})
+            store.manifest["stop_reason"] = trainer.stop_reason
         elif args.command in ("replay", "summarize"):
             if not args.records:
                 raise ValueError("--records required")

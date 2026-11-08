@@ -61,6 +61,11 @@ def load_config(path, overlays=(), overrides=()):
     config["validation"].setdefault("trajectories", 1)
     config["validation"].setdefault("sampled", False)
     config.setdefault("checkpoint_policy", {"stage_interval": 0, "keep_stages": 2})
+    config["checkpoint_policy"].setdefault("mode", "full")
+    config["checkpoint_policy"].setdefault("cycle_interval", 250)
+    from .convergence import DEFAULT_CONVERGENCE
+    config.setdefault("convergence", copy.deepcopy(DEFAULT_CONVERGENCE))
+    config.setdefault("trace_retention", {"phases": None, "validations": None, "inputs": None})
     config.setdefault("reward_normalization", {"enabled": False, "max_abs_slot_reward": 10.0})
     config.setdefault("monitoring", {"tensorboard": False, "console": True})
     config.setdefault("stopping", {"max_slots": None, "max_seconds": None})
@@ -120,7 +125,7 @@ def validate(config):
                "control_seconds", "backhaul_seconds", "lambda_time", "rejection_cost", "capacity_mask",
                "learned_rates", "fixed_split", "long_term_feedback", "dynamic_split", "initial_active",
                "history_slots", "servers", "access_points", "units", "profiles", "ppo", "ppo_layers",
-               "training", "seeds", "device", "validation", "checkpoint_policy", "reward_normalization", "monitoring", "stopping", "runtime"}
+               "training", "seeds", "device", "validation", "checkpoint_policy", "reward_normalization", "monitoring", "stopping", "runtime", "convergence", "trace_retention"}
     if set(config) - allowed:
         raise ValueError(f"Unknown configuration keys: {set(config) - allowed}")
     monitoring = config.get("monitoring", {"tensorboard": False, "console": True})
@@ -134,8 +139,14 @@ def validate(config):
     if stopping["max_seconds"] is not None and (type(stopping["max_seconds"]) not in (int, float) or stopping["max_seconds"] <= 0):
         raise ValueError("max_seconds must be positive or null")
     policy = config.get("checkpoint_policy", {"stage_interval": 0, "keep_stages": 2})
-    if set(policy) != {"stage_interval", "keep_stages"} or any(type(value) is not int or value < 0 for value in policy.values()):
+    if set(policy) - {"stage_interval", "keep_stages", "mode", "cycle_interval"} or any(type(policy[key]) is not int or policy[key] < 0 for key in ("stage_interval", "keep_stages")):
         raise ValueError("Invalid checkpoint retention policy")
+    if policy.get("mode", "full") not in ("full", "minimal"):
+        raise ValueError("Invalid checkpoint mode")
+    if type(policy.get("cycle_interval", 250)) is not int or policy.get("cycle_interval", 250) < 1:
+        raise ValueError("Checkpoint cycle interval must be positive")
+    if policy.get("mode") == "minimal" and policy["stage_interval"]:
+        raise ValueError("Minimal checkpoints do not retain stage snapshots")
     if policy["stage_interval"] and policy["keep_stages"] < 1:
         raise ValueError("Stage retention requires a positive limit")
     def finite(value):
@@ -146,6 +157,22 @@ def validate(config):
         return not isinstance(value, (int, float)) or math.isfinite(value)
     if not finite(config):
         raise ValueError("Nonfinite configuration")
+    from .convergence import DEFAULT_CONVERGENCE
+    convergence = config.get("convergence", DEFAULT_CONVERGENCE)
+    if set(convergence) != set(DEFAULT_CONVERGENCE) or type(convergence["enabled"]) is not bool:
+        raise ValueError("Invalid convergence settings")
+    for key in ("min_cycles", "window", "patience", "tail_cycles"):
+        if type(convergence[key]) is not int or convergence[key] < 1:
+            raise ValueError(f"Invalid convergence {key}")
+    if convergence["window"] < 2 or convergence["min_cycles"] < 2 * convergence["window"]:
+        raise ValueError("Convergence requires two complete windows before eligibility")
+    for key in ("relative_mean_tolerance", "relative_trend_tolerance", "relative_std_tolerance"):
+        if type(convergence[key]) not in (int, float) or not 0 < convergence[key] < 1:
+            raise ValueError(f"Invalid convergence {key}")
+    retention = config.get("trace_retention", {"phases": None, "validations": None, "inputs": None})
+    if set(retention) != {"phases", "validations", "inputs"} or any(
+            value is not None and (type(value) is not int or value < 1) for value in retention.values()):
+        raise ValueError("Trace retention requires positive counts or null")
     normalization = config.get("reward_normalization", {"enabled": False, "max_abs_slot_reward": 10.0})
     if set(normalization) != {"enabled", "max_abs_slot_reward"}:
         raise ValueError("Invalid reward normalization settings")

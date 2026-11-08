@@ -81,8 +81,8 @@ mist-sim/
 & D:/Anaconda/envs/pytorch/python.exe scripts/validation/check_training_scenario.py --witness --exact --seed 4100017
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method hpgi --dry-run
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method hpgi --seed 4200001
-& D:/Anaconda/envs/pytorch/python.exe -m mist_sim evaluate --checkpoint logs/runs/<训练ID>/checkpoints/final.pt --seed 4400019
-& D:/Anaconda/envs/pytorch/python.exe -m mist_sim replay --checkpoint logs/runs/<训练ID>/checkpoints/final.pt --records logs/runs/<评价ID>/traces/evaluation.json
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim evaluate --checkpoint logs/runs/<训练ID>/checkpoints/last.pt --seed 4400019
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim replay --checkpoint logs/runs/<训练ID>/checkpoints/last.pt --records logs/runs/<评价ID>/traces/evaluation.json
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim summarize --records logs/runs/<评价ID>/traces/evaluation.json
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --checkpoint logs/runs/<训练ID>/checkpoints/last.pt --extra-cycles 1
 ```
@@ -124,7 +124,7 @@ logs/runs/<运行名>/
 
 iterations.csv保存原始reward总和/每物理槽均值、归一化训练reward、完整能耗、服务指标、实际epoch数及loss。loss是所有已执行小批次按样本数加权的均值；reward来自更新前新采样的环境，不是每个epoch产生一次。epoch重复优化同一批数据，不能将重复epoch当成独立奖励样本。validation.csv的cycle_index为完整交替轮次（预训练结束为0），iteration保留旧的组件更新计数用于兼容。确定性return_per_episode和sampled_return_per_episode分列，两者使用相同请求；采样评价使用独立且固定的动作随机种子并恢复训练RNG。best仍按确定性成本选择，未用随机评价替代部署口径。固定开发集的return_per_episode用于观察确定性策略性能；episode原始回报另存，截断片段不冒充完整episode。结果图放results/<运行名>/figures/；跨运行图表按实验主题组织并注明输入CSV，检查报告不进results。
 
-当前HPGI：128槽一个episode；每次快层rollout为1024个transition，慢层为256个区间transition（Q4时同为1024槽）；采样后最多遍历5个PPO epoch。epoch不包含新的episode，不是重新采样。配置总量8192预训练槽＋28次慢/快交替＝65536训练槽，校准/验证另计；`--dry-run`零采样显示实际方法的用量。
+当前HPGI：128槽一个episode；每次快层rollout为1024个transition，慢层为256个区间transition（Q4时同为1024槽）；采样后最多遍历5个PPO epoch。epoch不包含新的episode，不是重新采样。上限为8192预训练槽＋3000次慢/快交替＝6152192训练槽，校准/验证另计；奖励稳定可提前停止，`--dry-run`零采样显示实际方法的上限。
 
 每个rollout使用新建on-policy buffer，保存状态、原动作前缀/掩码、旧联合logprob、价值、奖励、后继状态和终止/截断标志；更新时复算原动作概率，GAE处理bootstrap边界，更新后清空。当前minibatch=64，快层每epoch16批、慢层每epoch4批；5个epoch是本次增加样本复用的试运行值，不是已调优结论。KL超过0.03提前结束本次更新，下一次仍重新采样。
 
@@ -138,10 +138,12 @@ conditional配置默认启用TensorBoard，合成测试默认关闭。打开曲�
 
 浏览器访问http://127.0.0.1:6006。`ppo/upper|lower`横轴为该层累计epoch，`train/*`和`validation/*`横轴为累计训练物理槽。重点看固定验证输入的原始回报、成本与服务率，再用loss/KL/熵/梯度排障；PPO loss不要求单调下降。训练奖励尺度变化单独记录，不与原始回报混用。
 
-training.cycles指定本次完整交替轮数，当前28轮。验证奖励或成本连续不改善不会停止训练，也不自动宣告收敛；每轮原始评价点持续保存，用于观察稳定后的表现。需要更多尾部轮次可通过同版本检查点和--extra-cycles追加，保留原有曲线，不补造数据。
+training.cycles指定完整交替轮数上限，当前3000轮。convergence从第100轮起比较相邻两个20轮窗口：原始评价reward/slot均值相对差≤0.5%、40轮线性趋势相对跨度≤1%、最近20轮相对标准差≤2%。确定性与固定种子采样评价都须满足；连续5次满足后继续20轮，期间不稳定则重置计数，最早第124轮停止。分母为max(abs(前窗口均值),1)，预训练不参与判断。参数是可配置的运行起点，不是收敛保证；平台可能是差策略平台。没有“若干轮不刷新最佳值就停”的规则，不使用PPO loss判停。每轮判断写convergence.csv，summary/manifest记录真实退出原因。恢复保留窗口及计数；--extra-cycles只增加上限，不绕过已满足的稳定早停。
 
-仅保留显式--max-slots N/--max-seconds S预算限制、用户中断与错误退出。交互上限在完整rollout前检查，时间上限在槽/小批边界检查；中途打断保存interrupted.pt供诊断，续训使用完成阶段last.pt。KL>.03只结束本批PPO更新，不结束训练；非有限损失/梯度标记failed。
+此外保留显式--max-slots N/--max-seconds S预算限制、用户中断与错误退出。交互上限在完整rollout前检查，时间上限在槽/小批边界检查；中途打断保存interrupted.pt供诊断，续训使用最近已保存的last.pt。低频保存期间的更新可能需要重跑。KL>.03只结束本批PPO更新，不结束训练；非有限损失/梯度标记failed。
 
-检查点保存网络、优化器、统计、随机状态、epoch计数及完成阶段。默认initial/last/final/best/selected，阶段快照关闭；显式开启须设上限。best为开发选择，final为最终状态；没有服务阈值时不能称best满足论文业务要求。正常恢复用last/initial。
+conditional使用checkpoint_policy.mode=minimal：只覆盖last.pt，在启动、预训练完成、每250个完整iteration和正常结束保存，不逐组件/逐轮保存，不保存best或selected副本；最佳评价仅记录数值，不能据此声称存在相应权重。检查点保留网络、优化器、统计及随机状态供中断恢复与后续评价；完整曲线CSV每轮照常保存。其他配置默认full模式保持initial/last/final/best/selected语义，阶段快照须显式开启并设保留上限。
+
+conditional详细诊断仅保留最近2个已完成PPO阶段、最近2组评价（确定性/采样成对）和最近2条训练输入，最终评价另留。input_seeds.jsonl保留全部训练输入种子，结合固定配置/源码/剖面可重建输入；被清理阶段的逐动作轨迹不再支持直接重放。各轮奖励、loss、服务/能耗、逐评价轨迹统计CSV全部保留，不随诊断清理。
 
 完整验证套件默认系统临时空间，退出删除轨迹、报告与权重；仅显式`--keep-artifacts tmp/debug-example`保留排障现场，用完删除，不归档。检查结论必要时简短写入SETUP，详细证据可由tests和脚本重建。测试数值不进入论文性能表。

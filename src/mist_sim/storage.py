@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import platform
 import re
+import shutil
 import subprocess
 import time
 import tempfile
@@ -102,13 +103,15 @@ class RunStore:
         self.path.mkdir(parents=True, exist_ok=False)
         self.started = time.perf_counter()
         self.monitor = None
+        self.trace_retention = config.get("trace_retention", {})
+        self.trimmed_traces = set()
         self.monitoring = config.get("monitoring", {"tensorboard": False, "console": True})
         self.manifest = {"run_id": identifier, "command": command, "seed": seed,
                          "started_utc": datetime.now(timezone.utc).isoformat(), "status": "running",
                          "source": source_identity(self.root), "device": "cpu",
                          "dependencies": {"python": platform.python_version(), "numpy": np.__version__,
                                           "scipy": scipy.__version__, "torch": torch.__version__},
-                         "budget": None}
+                         "budget": None, "trace_retention": self.trace_retention}
         self.write_json("resolved_config.json", config)
         self.manifest["config_sha256"] = digest_file(self.path / "resolved_config.json")
         self.manifest["input_profile_sha256"] = hashlib.sha256(json.dumps(config["profiles"], sort_keys=True).encode()).hexdigest()
@@ -118,6 +121,37 @@ class RunStore:
 
     def write_json(self, name, value):
         write_json(self.path / name, value)
+
+    def record_input_seed(self, index, seed):
+        with (self.path / "input_seeds.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(dict(index=index, seed=seed)) + "\n")
+        keep = self.trace_retention.get("inputs")
+        if keep is not None:
+            for path in sorted((self.path / "traces" / "inputs").glob("input_*.json"))[:-keep]:
+                path.unlink()
+
+    def retain_traces(self, kind, completed):
+        """Bound completed diagnostics only; scalar CSV and input seed ledger survive."""
+        if kind not in ("phases", "validations"):
+            raise ValueError("Unknown trace kind")
+        keep = self.trace_retention.get(kind)
+        if keep is None:
+            return
+        root = self.path / "traces" / ("validation" if kind == "validations" else kind)
+        for stage in completed[:-keep]:
+            if (kind, stage) in self.trimmed_traces:
+                continue
+            if not re.fullmatch(r"initial|pretrain(?:_\d+)?|cycle_\d+(?:_upper|_lower)?", stage):
+                raise ValueError("Invalid trace stage")
+            paths = [root / stage] if kind == "phases" else [root / (stage + suffix + ".json") for suffix in ("", "_sampled")]
+            for path in paths:
+                if not path.resolve().is_relative_to((self.path / "traces").resolve()):
+                    raise ValueError("Trace escaped run directory")
+                if path.is_dir():
+                    shutil.rmtree(path)
+                elif path.exists():
+                    path.unlink()
+            self.trimmed_traces.add((kind, stage))
 
     def append_metrics(self, metrics):
         from .results import iteration_row

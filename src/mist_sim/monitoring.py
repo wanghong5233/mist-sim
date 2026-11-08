@@ -93,7 +93,10 @@ class ConsoleProgress:
         elif event == "training_stopped":
             self.write(f"训练停止：{fields['reason']}")
         elif event == "training_completed":
-            self.write("训练完成：已执行全部配置迭代")
+            self.write("训练完成：" + ("评价奖励持续稳定，已完成尾部迭代" if fields.get("reason") == "reward_stable" else "已执行全部配置迭代"))
+        elif event == "convergence_checked":
+            if fields["ready"]:
+                self.write(f"奖励稳定检查：连续满足 {fields['stable_checks']} 次 | 尾部剩余={fields['tail_remaining']}")
 
 
 def format_event(event, fields):
@@ -122,6 +125,10 @@ def format_event(event, fields):
         return f"{prefix} {fields['layer']} sampling {fields['samples']}/{fields['target_samples']}"
     if event == "training_stopped":
         return f"{prefix} stopped: {fields['reason']}"
+    if event == "training_completed":
+        return f"{prefix} completed: {fields['reason']}"
+    if event == "convergence_checked":
+        return f"{prefix} reward stability: ready={fields['ready']} stable={fields['stable']} checks={fields['stable_checks']} tail={fields['tail_remaining']} stop={fields['stop']}"
     if event in ("phase_started", "validation_started", "training_started", "training_completed", "calibration_completed"):
         return f"{prefix} {event}"
     return None

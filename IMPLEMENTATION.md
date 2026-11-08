@@ -58,7 +58,7 @@ PPO的critic目标是**GAE lambda-return `A+V_old`**，不是完整Monte Carlo�
 |交替快层|1024个快层transition|1024槽/8条|每epoch16批，最多80步|
 |交替慢层|256个区间transition|1024槽/8条|每epoch4批，最多20步|
 
-预训练总量8192按fast_slots分块，最后一块允许不足1024；块后更新再重新采样，恢复跳过完成块。之后28次慢/快交替，HPGI合计65536训练槽，校准/验证另计。保留128槽episode与每rollout八条完整轨迹：GAE有效记忆约20快槽/80慢层物理槽，128槽已覆盖多次Q4控制及唤醒；当前没有证据需缩短episode，缩短还会改变有限时域目标。只将PPO epoch由2增为5，上层每轮梯度步8→20、下层32→80，保留KL=.03保护、64宽、学习率和奖励。训练按配置完成全部交替轮次，无连续无改善早停；验证曲线仅监测，不自动判定收敛。需要稳定后的更多曲线点可追加实际训练轮次。相邻样本相关，不能当独立样本；预训练一大块8192只更新一次的旧节奏已替换。
+预训练总量8192按fast_slots分块，最后一块允许不足1024；块后更新再重新采样，恢复跳过已保存的完成块。之后最多3000次慢/快交替，HPGI上限6152192训练槽，校准/验证另计。保留128槽episode与每rollout八条完整轨迹：GAE有效记忆约20快槽/80慢层物理槽，128槽覆盖多次Q4控制及唤醒。PPO最多5epoch、KL=.03保护，网络、学习率和奖励不随停止规则改变。convergence只读取完整交替后的原始固定评价回报，双窗口均值、趋势与波动都稳定且完成尾部轮次才停止；确定性和采样评价分别检查。状态存于validation_history以支持恢复，具体阈值见配置与README，不将经验平台称为成功学习或最优性证明。
 
 17槽episode的慢层持续长度为4/4/4/4/1。真实终止不bootstrap；采样截断使用正确下一观测和价值，GAE不跨重置。新collect从新episode开始，截断后未采样的后缀不补造。若horizon/Q/方法改变，物理交互预算必须重新核算：Q1、Always-On、仅慢层学习不能凭相同cycles宣称公平。
 
@@ -76,7 +76,7 @@ PPO的critic目标是**GAE lambda-return `A+V_old`**，不是完整Monte Carlo�
 
 评价和冻结层使用`record=False`动作路径，跳过critic及训练记录；采样在同一rollout内复用已算出的后继frame/value，重置时清空缓存。PPO的`RolloutTensors`只缓存原始输入、掩码及已选动作张量，跨epoch复用；网络激活仍逐次重算，缓存随本次更新释放。环境时序、容量前缀、GAE递推和P3二分保留必要顺序。
 
-behavior采用`mist.behavior.shared.v1`共享frame/特征组格式，避免重复展开相邻观测与上层前缀；统一通过`traces.read_behavior`还原，兼容旧JSON列表。JSON采用缓冲流式写入临时文件后原子替换，不构造完整输出字符串；失败保留上一个完整文件。检查点history仅存每阶段标量及短摘要，不再携带输入诊断、逐槽duration和transition例子，完整证据各存于原诊断文件。恢复仍保存完整优化器、归一化器、随机状态与选择历史，原始结果CSV不变。
+behavior采用`mist.behavior.shared.v1`共享frame/特征组格式，避免重复展开相邻观测与上层前缀；统一通过`traces.read_behavior`还原，兼容旧JSON列表。JSON采用缓冲流式写入临时文件后原子替换。检查点history仅存每阶段标量及短摘要，恢复仍保存优化器、归一化器、随机状态与评价历史。conditional按完整迭代低频覆盖一个last.pt；诊断按trace_retention有界保留，输入种子与所有原始结果CSV不删。细节与恢复边界见README。
 
 先看resolved_config和progress阶段；`traces/phases/<阶段>/`内rollout.json给出样本/物理槽/episode/小批次数及代表transition，behavior.json保存完整观测/前缀/掩码，inputs.json给出输入与网络诊断，update.json保存TD/GAE/loss/梯度，physical.json保存执行。`inspect_logs.py`兼容新旧目录并独立复算；`check_rollouts.py`只采样核验。
 
@@ -86,7 +86,7 @@ PPO更新通过`policies/batching.py`执行小批张量前向/反向：按候选
 
 `runtime.torch_threads`可配置CPU算子线程数，默认1；小网络串行采样与批量更新对线程数的收益不同，需按整条链路实测，不能用线程数推断并行效率。`scripts/validation/benchmark_batching.py`默认使用合成变长输入，也可传--behavior读取已有轨迹，只测量不写结果或更新权重。
 
-终端按完整交替轮次显示Iteration及三个步骤：服务器PPO、调度PPO、联合评价。采样、epoch和评价轨迹进度使用tqdm临时单行，结束清除；非交互输出省略进度条。每轮摘要记录联合评价原始平均episode回报、成本/时隙、按时率及两个组件各自的样本加权平均loss，不把两层loss合成整体目标。详细逐epoch诊断仍写stdout.log、progress.jsonl和TensorBoard；关闭writer后才计算文件哈希。CSV的iteration字段保留组件更新计数，新validation.csv显式增加cycle_index表示完整轮次；确定性与固定种子概率采样reward分列，两者仅用于监测与分析，不触发停止，不改写历史结果。原始episode回报和固定验证回报不受归一化尺度影响；训练奖励/尺度/裁剪次数另列。具体命令、停止开关和目录说明只在README维护。
+终端按完整交替轮次显示Iteration及三个步骤：服务器PPO、调度PPO、联合评价。采样、epoch和评价轨迹进度使用tqdm临时单行，结束清除；非交互输出省略进度条。每轮摘要记录联合评价原始平均episode回报、成本/时隙、按时率及两个组件各自的样本加权平均loss。详细逐epoch诊断仍写stdout.log、progress.jsonl和TensorBoard；关闭writer后才计算文件哈希。CSV的iteration字段保留组件更新计数，validation.csv的cycle_index表示完整轮次；确定性与固定种子概率采样reward分列，启用convergence时共同决定稳定停止。原始episode回报和固定验证回报不受归一化尺度影响；训练奖励/尺度/裁剪次数另列。具体命令、停止开关和目录说明只在README维护。
 
 - [CleanRL PPO](https://github.com/vwxyzjn/cleanrl/blob/fe8d8a03c41a7ef5b523e2e354bd01c363e786bb/cleanrl/ppo.py)：fe8d8a03c41a7ef5b523e2e354bd01c363e786bb，MIT；正交初始化、Adam、GAE、clip/KL/梯度经验参考，没有复制源码文件。
 - [SB3](https://github.com/DLR-RM/stable-baselines3/tree/0cdcd200deef06b9ad0af72f6ddfb07c06c6df39)：MIT；终止/截断、种子与评价核对。[MaskablePPO](https://github.com/Stable-Baselines-Team/stable-baselines3-contrib/tree/a8af63682070df0bda9707400b2e971055600910)：MIT；掩码语义核对，不调用其learn。
