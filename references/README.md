@@ -12,6 +12,8 @@ git -C references/MERA status --short
 
 只在目录不存在时clone；已有目录先核对origin、HEAD及未提交修改，不自动覆盖。
 
+结果管理核查：上述提交的resource_rl.py通过TensorBoard记录逐步Reward和Energy等指标，未提供可直接复用的训练结果CSV导出链路。MIST独立保存iteration/episode/评价CSV，日志仅用于排障；不把参考仓库的记录方式当成强制目录标准。
+
 |文件|可参考内容|不可直接迁移的内容|
 |---|---|---|
 |environment.py|状态、动作、step分工|旧Gym接口；导入即读CSV和随机改服务器资源；不是V6期限/切分/唤醒模型|

@@ -273,7 +273,10 @@ class Trainer:
         finally:
             for parameter in frozen.parameters():
                 parameter.requires_grad_(True)
-        metrics = dict(stage=name, layer=layer, behavior_logprob_error=max(differences, default=0),
+        metrics = dict(iteration=len(self.history) + 1, stage=name, layer=layer,
+                       physical_slots=len(records), raw_reward_sum=sum(record["reward"] for record in records),
+                       raw_reward_per_slot=sum(record["reward"] for record in records) / len(records),
+                       behavior_logprob_error=max(differences, default=0),
                        reward_units=units,
                        reward_clipped_slots=sum(abs(record["reward"] * units["scale"]) > units["clip"]
                                                 for record in records) if units["clip"] is not None else 0,
@@ -406,7 +409,7 @@ class Trainer:
                                   "checkpoint_sha256": digest_file(selected_path) if selected_path is not None and selected_path.is_file() else None,
                                   "service_requirement_specified": minimum is not None})
             self.save(self.store.path / "checkpoints" / "last.pt")
-        self.event("validation_completed", stage=stage, service=metrics["on_time_rate"],
+        self.event("validation_completed", iteration=len(self.history), stage=stage, service=metrics["on_time_rate"],
                    cost=metrics["conservative_cost"], eligible=service_ok, selected=improved,
                    cost_per_slot=metrics["conservative_cost"] / len(records),
                    return_per_episode=sum(record["reward"] for record in records) / len(per_trajectory),

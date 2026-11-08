@@ -85,6 +85,9 @@ class RunStore:
         if Path(identifier).name != identifier or identifier in (".", ".."):
             raise ValueError("Invalid run id")
         self.path = (Path(output_dir).resolve() if output_dir is not None else self.root / "logs" / "runs") / identifier
+        self.result_path = self.root / "results" / identifier if output_dir is None else self.path / "results"
+        if self.result_path.exists():
+            raise FileExistsError(self.result_path)
         self.path.mkdir(parents=True, exist_ok=False)
         self.started = time.perf_counter()
         self.monitor = None
@@ -106,16 +109,26 @@ class RunStore:
         write_json(self.path / name, value)
 
     def append_metrics(self, metrics):
+        from .results import iteration_row
+        self.append_result("iterations.csv", iteration_row(metrics))
         with (self.path / "metrics.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(metrics, ensure_ascii=False, allow_nan=False) + "\n")
         with (self.path / "stdout.log").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps({"stage": metrics["stage"], "samples": metrics["samples"], "total_slots": metrics["total_slots"]}) + "\n")
+
+    def append_result(self, name, row):
+        from .results import append_csv
+        append_csv(self.result_path / name, dict(run_id=self.manifest["run_id"], seed=self.manifest["seed"], **row))
 
     def event(self, event, **fields):
         from .monitoring import TrainingMonitor, format_event
         if event in ("training_started", "phase_started") and self.monitor is None:
             self.monitor = TrainingMonitor(self.path / "tensorboard", self.monitoring["tensorboard"])
         record = dict(event=event, elapsed_seconds=time.perf_counter() - self.started, **fields)
+        if event == "episode_completed":
+            self.append_result("episodes.csv", fields)
+        elif event == "validation_completed":
+            self.append_result("validation.csv", fields)
         line = json.dumps(record, ensure_ascii=False, allow_nan=False)
         with (self.path / "progress.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(line + "\n")
@@ -141,3 +154,12 @@ class RunStore:
         self.manifest["artifacts"] = {str(path.relative_to(self.path)): digest_file(path)
                                       for path in self.path.rglob("*") if path.is_file() and path.name != "manifest.json"}
         self.write_json("manifest.json", self.manifest)
+        if self.result_path.exists():
+            write_json(self.result_path / "resolved_config.json",
+                       json.loads((self.path / "resolved_config.json").read_text(encoding="utf-8")))
+            result_manifest = dict(self.manifest)
+            result_manifest["logs_path"] = str(self.path)
+            result_manifest["artifacts"] = {str(path.relative_to(self.result_path)): digest_file(path)
+                                             for path in self.result_path.rglob("*")
+                                             if path.is_file() and path.name != "manifest.json"}
+            write_json(self.result_path / "manifest.json", result_manifest)

@@ -29,6 +29,19 @@ def test_explicit_name_and_nonoverwrite(tmp_path):
         RunStore(tmp_path, config, "check", 7, "input-check-test")
 
 
+def test_results_are_separate_and_preserve_failed_run(tmp_path):
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "fixture"\n', encoding="utf-8")
+    store = RunStore(tmp_path, {"profiles": {}, "method": "hpgi"}, "train", 7, "result-test")
+    store.append_result("evaluation.csv", {"completed": 0, "on_time_rate": None})
+    store.finish(error=RuntimeError("test failure"))
+    assert store.result_path == tmp_path / "results/result-test"
+    assert not (store.path / "evaluation.csv").exists()
+    assert (store.result_path / "evaluation.csv").read_text().splitlines()[1] == "result-test,7,0,"
+    assert json.loads((store.result_path / "manifest.json").read_text())["status"] == "failed"
+    with pytest.raises(FileExistsError):
+        RunStore(tmp_path, {"profiles": {}}, "train", 7, "result-test")
+
+
 @pytest.mark.parametrize("fail", [False, True])
 def test_validation_workspace_cleans_success_and_failure(fail):
     directory = None

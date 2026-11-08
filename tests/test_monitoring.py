@@ -56,6 +56,21 @@ def test_tensorboard_matches_raw_logs_and_does_not_change_learning(config, tmp_p
     assert [scalar.value for scalar in accumulator.Scalars("validation/return_per_episode")] == pytest.approx(
         [event["return_per_episode"] for event in validation])
     checked = inspect_run(store.path)
+    import csv
+    with (store.result_path / "iterations.csv").open(encoding="utf-8", newline="") as stream:
+        rows = list(csv.DictReader(stream))
+    assert [int(row["iteration"]) for row in rows] == [1, 2, 3]
+    for row in rows:
+        physical = json.loads((store.path / "traces/phases" / row["stage"] / "physical.json").read_text(encoding="utf-8"))
+        assert float(row["raw_reward_per_slot"]) == pytest.approx(sum(item["reward"] for item in physical) / len(physical))
+        audit = json.loads((store.path / "traces/phases" / row["stage"] / "update.json").read_text(encoding="utf-8"))
+        batches = audit["minibatches"]
+        assert float(row["loss"]) == pytest.approx(sum(batch["total_loss"] * len(batch["indices"]) for batch in batches) / sum(len(batch["indices"]) for batch in batches))
+    with (store.result_path / "validation.csv").open(encoding="utf-8", newline="") as stream:
+        assert [float(row["return_per_episode"]) for row in csv.DictReader(stream)] == pytest.approx([event["return_per_episode"] for event in validation])
+    result_manifest = json.loads((store.result_path / "manifest.json").read_text(encoding="utf-8"))
+    for name, digest in result_manifest["artifacts"].items():
+        assert digest_file(store.result_path / name) == digest
     assert len(checked["updates"]) == 3 and len(checked["physics"]) == 7
     manifest = json.loads((store.path / "manifest.json").read_text(encoding="utf-8"))
     for name, digest in manifest["artifacts"].items():
@@ -84,6 +99,9 @@ def test_cli_interaction_stop_and_exact_resume(config, tmp_path):
     resumed = main(["train", "--checkpoint", str(run / "checkpoints/last.pt"), "--output-dir", str(output),
                     "--run-id", "resumed"])
     restored = Trainer.load(resumed / "checkpoints/final.pt")
+    import csv
+    with (resumed / "results/iterations.csv").open(encoding="utf-8", newline="") as stream:
+        assert [int(row["iteration"]) for row in csv.DictReader(stream)] == [2, 3]
     uninterrupted = Trainer(config, config["seeds"]["train"])
     uninterrupted.run()
     assert restored.total_slots == 23 and len(restored.completed_stages) == 3

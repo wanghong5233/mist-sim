@@ -20,6 +20,6 @@
 |maintenance/|catalog_runs.py|只读运行资产盘点|
 |maintenance/|archive_runs.ps1、restore_run.ps1|既有历史资产工具，按明确任务使用，不是测试产物默认流程|
 
-profile_models与export_profiles的持久输出在data/profiling，数值输入在data/processed。检查、诊断、维护脚本默认打印到终端；--output或--summary仅用于显式排障导出（放tmp，用完删除）。验证套件的reports和logs/runs均位于系统临时空间，退出删除。results只用于正式实验图表，不能作为检查脚本的默认落盘目录。
+profile_models与export_profiles的持久输出在data/profiling，数值输入在data/processed。检查、诊断、维护脚本默认打印到终端；--output或--summary仅用于显式排障导出（放tmp，用完删除）。验证套件的报告、日志、CSV均位于系统临时空间，退出删除。正式训练/评价自动写results/<运行名>中的原始CSV；后续图表以CSV为输入，不能把results作为检查脚本默认落盘目录。
 
 训练用量预览用`python -m mist_sim train --config configs/conditional.json --dry-run`；TensorBoard与停止/恢复命令在README维护。测试产物默认临时目录、退出删除；需要保留排障原始文件时显式指定新目录。正式结果保留成功和失败。不创建空plots目录；有绘图入口时再增加。

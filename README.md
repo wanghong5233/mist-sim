@@ -29,7 +29,7 @@ mist-sim/
 ├── scripts/       data/数据处理，validation/核验，maintenance/维护
 ├── data/          raw/原始输入，profiling/剖析及来源，processed/仿真数值输入
 ├── logs/runs/     正式训练/评价的运行记录，执行时创建
-├── results/       正式实验汇总表和论文图，产生结果时创建
+├── results/       每次运行的原始结果CSV，以及据此生成的统计表和论文图
 └── references/    只读上游参考，不是运行依赖
 ```
 
@@ -103,7 +103,11 @@ logs/runs/<运行名>/
 └── summary.json、validation_history.json、selection.json
 ```
 
-日志用于观察训练过程，traces用于复算，checkpoints用于恢复。summary.json是单次运行的小结；多个正式运行的统计、对照表和论文图才导出到results/<实验主题>/，记录来源运行和生成命令。results不放代码检查报告。
+日志用于排障，traces用于详细复算，checkpoints用于恢复。正式数值结果在results/<同一运行名>/：iterations.csv每次新采样和PPO更新一行；episodes.csv每个完整episode一行；validation.csv每次固定开发集评价一行；evaluation.csv保存独立评价指标。每个目录带配置及来源/校验清单。仅在对应事件发生时创建文件，不预建空目录；中断前已完成的结果保留并标记运行状态。显式--output-dir用于临时验证时，结果在该运行包的results内，随临时包一起清理。
+
+收敛图可用iteration作横轴；一个iteration是一个层的新rollout加一次PPO更新，stage/layer区分预训练、慢层和快层，不能混成同一条回报曲线。跨算法比较优先用total_slots（累计实际训练交互槽数），避免各方法每次迭代的数据量不同。原始CSV不平滑、不舍弃点；绘图时可额外展示滚动均值，并注明窗口。
+
+iterations.csv保存原始reward总和/每物理槽均值、归一化训练reward、完整能耗、服务指标、实际epoch数及loss。loss是所有已执行小批次按样本数加权的均值；reward来自更新前新采样的环境，不是每个epoch产生一次。epoch重复优化同一批数据，不能将重复epoch当成独立奖励样本。固定开发集的return_per_episode更适合观察策略性能；episode原始回报另存，截断片段不冒充完整episode。结果图放results/<运行名>/figures/；跨运行图表按实验主题组织并注明输入CSV，检查报告不进results。
 
 当前HPGI：128槽一个episode；每次快层rollout为1024个transition，慢层为256个区间transition（Q4时同为1024槽）；采样后最多遍历2个PPO epoch。epoch不包含新的episode，不是重新采样。配置总量8192预训练槽＋28次慢/快交替＝65536训练槽，校准/验证另计；`--dry-run`零采样显示实际方法的用量。
 

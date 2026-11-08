@@ -152,6 +152,9 @@ def run_command(args, config, trainer):
                 records, metrics = evaluate(controller, config, trace, args.measured_latency)
                 store.write_json("traces/evaluation.json", records)
                 store.write_json("summary.json", metrics)
+                if args.command == "evaluate":
+                    store.append_result("evaluation.csv", {key: value for key, value in metrics.items() if key != "energy"}
+                                        | {"energy_" + key: value for key, value in metrics["energy"].items()})
                 if args.command == "check":
                     replay(config, records)
         store.finish()
