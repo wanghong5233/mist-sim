@@ -9,6 +9,15 @@ METHODS = ("hpgi", "always_on", "fixed_split", "single_timescale", "fixed_window
            "upper_ppo_greedy", "greedy_consolidation", "nominal", "full_information")
 
 
+def default_project_root():
+    current = Path.cwd()
+    source = Path(__file__).resolve().parents[2]
+    for candidate in (current, source):
+        if (candidate / "pyproject.toml").is_file() and (candidate / "configs/smoke.json").is_file():
+            return candidate
+    return current
+
+
 def merge_config(base, overlay, path=""):
     result = copy.deepcopy(base)
     for key, value in overlay.items():

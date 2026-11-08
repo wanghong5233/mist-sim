@@ -45,6 +45,8 @@ mist-sim/
 
 确认executable及package_path。后续命令同样使用该绝对解释器；其他机器先按pyproject安装依赖及`pip install --no-deps -e .`。PPO默认CPU；离线测量可用GPU。仿真只查数值剖面，不加载三个视觉模型，不需训练视觉网络。
 
+普通安装同样支持：从克隆的mist-sim根目录运行，CLI优先使用当前工程配置；从其他目录运行时显式传`--root 工程路径`。验证套件从工程根运行，不假定机器上存在论文目录。
+
 `configs/smoke.json`是随仓库提供的手算合成测试；`configs/conditional.json`引用本机ResNet50/ResNet152/ViT-B32结构剖面，8服务器、40终端等资源/业务/功率为条件假设。本地来源见data/SCENARIO.md和data/LOCAL_SOURCES.md；这些私有资产不随clone分发。
 
 ## 方法与模块

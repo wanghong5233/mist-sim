@@ -45,3 +45,18 @@ def test_manuscript_is_an_explicit_optional_dependency(tmp_path):
     checksums = INDEX["paper_checksums"](tmp_path)
     assert len(checksums["main.tex"]) == 64
     assert checksums["main.tex"] == checksums["main.pdf"]
+
+
+def test_project_root_supports_installed_and_editable_packages(monkeypatch, tmp_path):
+    from mist_sim import config
+    checkout = tmp_path / "checkout"
+    (checkout / "configs").mkdir(parents=True)
+    (checkout / "pyproject.toml").write_text("", encoding="utf-8")
+    (checkout / "configs/smoke.json").write_text("{}", encoding="utf-8")
+    with monkeypatch.context() as patched:
+        patched.setattr(config, "__file__", str(tmp_path / "site-packages/mist_sim/config.py"))
+        patched.chdir(checkout)
+        assert config.default_project_root() == checkout
+        patched.chdir(tmp_path)
+        patched.setattr(config, "__file__", str(checkout / "src/mist_sim/config.py"))
+        assert config.default_project_root() == checkout

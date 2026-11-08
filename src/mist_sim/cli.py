@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sys
 import torch
-from .config import load_config, for_method, METHODS
+from .config import load_config, for_method, METHODS, default_project_root
 from .anonymity import generate_trace
 from .environment import Environment
 from .evaluation import evaluate, replay, summarize
@@ -19,7 +19,7 @@ def main(argv=None):
         sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("check", "train", "evaluate", "replay", "summarize", "reference"))
-    root = Path(__file__).resolve().parents[2]
+    root = default_project_root()
     parser.add_argument("--root", type=Path, default=root)
     parser.add_argument("--config", type=Path)
     parser.add_argument("--overlay", type=Path, action="append", default=[])

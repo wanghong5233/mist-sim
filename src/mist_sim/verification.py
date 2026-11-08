@@ -88,7 +88,8 @@ def verify_one(root, config, seed, output_dir):
 
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
-    root = Path(__file__).resolve().parents[2]
+    from .config import default_project_root
+    root = default_project_root()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--keep-artifacts", type=Path, help="Explicit new debug directory; default uses disposable OS temp")
     parser.add_argument("--skip-unit-tests", action="store_true", help="Use only after a separate successful pytest run")
