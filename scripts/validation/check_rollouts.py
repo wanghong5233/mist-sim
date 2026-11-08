@@ -47,7 +47,7 @@ def main():
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=root / "configs/conditional.json")
-    parser.add_argument("--summary", type=Path, default=root / "results/validation/rollout_check.json")
+    parser.add_argument("--summary", type=Path, help="Optional diagnostic output; default prints only")
     args = parser.parse_args()
     started = time.perf_counter()
     config = load_config(args.config)
@@ -83,7 +83,8 @@ def main():
     report.update(measured_wall_seconds=time.perf_counter() - started, optimizer_steps=0,
                   calibration_slots=config["training"]["calibration_episodes"] * config["horizon"],
                   collected_physical_slots=trainer.total_slots, retained_weights_or_raw_trajectories=False)
-    write_json(args.summary, report)
+    if args.summary:
+        write_json(args.summary, report)
     print(json.dumps({key: value for key, value in report.items() if key not in ("config", "layers", "input_hashes")}))
 
 

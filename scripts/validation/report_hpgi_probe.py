@@ -58,7 +58,7 @@ def main():
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", type=Path, required=True)
-    parser.add_argument("--output", type=Path, default=Path("results/diagnostics/hpgi_probe_summary.json"))
+    parser.add_argument("--output", type=Path, help="Optional diagnostic output; default prints only")
     args = parser.parse_args()
     started = time.perf_counter()
     manifest = read_json(args.run / "manifest.json")
@@ -116,7 +116,8 @@ def main():
                   estimated_65536_training_seconds=estimate,
                   estimate_scope="Linear extrapolation; not measured full training, excludes calibration and post-run reproduction; large rollouts may scale nonlinearly",
                   formal_performance_evidence=False, measured_verification_seconds=time.perf_counter() - started)
-    write_json(args.output, report)
+    if args.output:
+        write_json(args.output, report)
     print(json.dumps({key: report[key] for key in ("status", "measured_run_seconds", "total_training_slots",
                                                   "reloaded_actions_equal", "estimated_65536_training_seconds",
                                                   "measured_verification_seconds")}, indent=2))

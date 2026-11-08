@@ -21,6 +21,9 @@ def test_explicit_name_and_nonoverwrite(tmp_path):
     config = {"profiles": {}, "method": "hpgi"}
     store = RunStore(tmp_path, config, "check", 7, "input-check-test")
     store.finish()
+    assert store.path == tmp_path / "logs/runs/input-check-test"
+    assert not (tmp_path / "runs").exists()
+    assert not (tmp_path / "results").exists()
     assert json.loads((store.path / "manifest.json").read_text(encoding="utf-8"))["run_id"] == "input-check-test"
     with pytest.raises(FileExistsError):
         RunStore(tmp_path, config, "check", 7, "input-check-test")
@@ -57,7 +60,7 @@ def test_output_directory_keeps_source_identity_separate(tmp_path):
     store = RunStore(source, {"profiles": {}}, "check", 1, output_dir=output)
     store.finish()
     assert store.path.parent == output
-    assert not (source / "runs").exists()
+    assert not (source / "logs").exists()
     assert "pyproject.toml" in store.manifest["source"]["files"]
 
 
@@ -66,8 +69,8 @@ def test_check_cli_uses_disposable_output(monkeypatch):
     captured = []
 
     def inspect_output(args):
-        assert args.output_dir.parent.is_dir()
-        captured.append(args.output_dir.parent)
+        assert args.output_dir.parents[1].is_dir()
+        captured.append(args.output_dir.parents[1])
 
     monkeypatch.setattr(cli, "execute", inspect_output)
     cli.main(["check"])
@@ -81,8 +84,8 @@ def test_synthetic_cli_does_not_persist_by_default(monkeypatch, command):
 
     def inspect_output(args, config, trainer):
         assert config["fixture_kind"] == "synthetic_hand_calculation"
-        assert args.output_dir.parent.is_dir()
-        captured.append(args.output_dir.parent)
+        assert args.output_dir.parents[1].is_dir()
+        captured.append(args.output_dir.parents[1])
 
     monkeypatch.setattr(cli, "run_command", inspect_output)
     cli.main([command])

@@ -1,7 +1,7 @@
 param([switch]$Apply, [switch]$IncludeEngineeringValidation)
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../..')).Path
-$runsRoot = (Resolve-Path -LiteralPath (Join-Path $projectRoot 'runs')).Path
+$runsRoot = (Resolve-Path -LiteralPath (Join-Path $projectRoot 'logs/runs')).Path
 $archivesRoot = Join-Path $projectRoot 'archives/runs'
 $pattern = '(?:[A-Za-z0-9_-]+__)?\d{8}T\d{6}_[0-9a-f]{10}'
 $protected = [System.Collections.Generic.HashSet[string]]::new()
@@ -37,7 +37,7 @@ Write-Output "Protected IDs: $($protected.Count); archive candidates: $($candida
 if (-not $Apply) { $candidates | Select-Object Name; return }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Directory]::CreateDirectory($archivesRoot) | Out-Null
-$reportPath = Join-Path $projectRoot 'results/maintenance/run_archives.csv'
+$reportPath = Join-Path $projectRoot 'logs/run_archives.csv'
 [IO.Directory]::CreateDirectory((Split-Path -Parent $reportPath)) | Out-Null
 $rows = @()
 if (Test-Path -LiteralPath $reportPath) { $rows = @(Import-Csv -LiteralPath $reportPath) }
@@ -71,7 +71,7 @@ foreach ($candidate in $candidates) {
         }
     } finally { $archive.Dispose() }
     $rows = @($rows | Where-Object run_id -ne $candidate.Name)
-    $rows += [pscustomobject]@{run_id=$candidate.Name; original_path="runs/$($candidate.Name)"; archive_path="archives/runs/$($candidate.Name).zip"; original_bytes=($originals | Measure-Object Length -Sum).Sum; archive_bytes=(Get-Item -LiteralPath $archivePath).Length; archive_sha256=(Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash; files=$originals.Count; verified=$true}
+    $rows += [pscustomobject]@{run_id=$candidate.Name; original_path="logs/runs/$($candidate.Name)"; archive_path="archives/runs/$($candidate.Name).zip"; original_bytes=($originals | Measure-Object Length -Sum).Sum; archive_bytes=(Get-Item -LiteralPath $archivePath).Length; archive_sha256=(Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash; files=$originals.Count; verified=$true}
     $temporaryReport = $reportPath + '.partial'
     $rows | Export-Csv -LiteralPath $temporaryReport -NoTypeInformation -Encoding utf8
     for ($attempt = 0; $attempt -lt 5; $attempt++) {

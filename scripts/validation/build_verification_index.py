@@ -21,15 +21,15 @@ def main():
     parser.add_argument("--paper-dir", type=Path, help="Optional local manuscript directory; never uploaded")
     args = parser.parse_args()
     workspace = args.workspace.resolve()
-    smoke = json.loads((workspace / "results/smoke_verification.json").read_text(encoding="utf-8"))
-    commands = json.loads((workspace / "results/cli_verification.json").read_text(encoding="utf-8"))
+    smoke = json.loads((workspace / "reports/smoke_verification.json").read_text(encoding="utf-8"))
+    commands = json.loads((workspace / "reports/cli_verification.json").read_text(encoding="utf-8"))
     identifiers = [smoke["suite_run_id"], smoke["resume_run_id"], commands["run_id"]]
     identifiers += [case["run_id"] for case in smoke["cases"]]
     identifiers += [case["run_id"] for case in commands["checks"]]
     entries = []
     current_files = source_identity(root)["files"]
     for identifier in dict.fromkeys(identifiers):
-        directory = workspace / "runs" / identifier
+        directory = workspace / "logs/runs" / identifier
         manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
         if manifest["status"] not in ("completed", "failed"):
             raise AssertionError(f"Unfinished run: {identifier}")
@@ -51,7 +51,7 @@ def main():
     for case in smoke["cases"]:
         if case["method"] == "greedy_consolidation":
             continue
-        checkpoints = workspace / "runs" / case["run_id"] / "checkpoints"
+        checkpoints = workspace / "logs/runs" / case["run_id"] / "checkpoints"
         initial = torch.load(checkpoints / "initial.pt", map_location="cpu", weights_only=False)["controller"]
         final = torch.load(checkpoints / "final.pt", map_location="cpu", weights_only=False)["controller"]
         check = {"method": case["method"], "horizon": case["horizon"]}
@@ -63,14 +63,14 @@ def main():
                 raise AssertionError(f"Unexpected actor update: {case['method']} {layer}")
             check[layer + "_changed_tensors"] = changed
         actor_checks.append(check)
-    result = {"source_commit": smoke["source"]["commit"], "local_runs_root": str(workspace / "runs"),
+    result = {"source_commit": smoke["source"]["commit"], "local_runs_root": str(workspace / "logs/runs"),
               "rebuild_commands": ["python -m mist_sim.verification --keep-artifacts NEW_DEBUG_DIRECTORY"],
               "training_slots_main_cases": sum(case["training_slots"] for case in smoke["cases"]),
               "test_slots_main_cases": sum(case["test_slots"] for case in smoke["cases"]),
               "paper_sha256": paper_checksums(args.paper_dir),
               "paper_check": "checked" if args.paper_dir else "not_requested",
               "all_listed_assets_checked": True, "actor_update_checks": actor_checks, "runs": entries}
-    write_json(workspace / "results/artifact_index.json", result)
+    write_json(workspace / "reports/artifact_index.json", result)
     print(json.dumps({"runs": len(entries), "training_slots": result["training_slots_main_cases"],
                       "test_slots": result["test_slots_main_cases"], "checksums": "passed"}, ensure_ascii=False))
 

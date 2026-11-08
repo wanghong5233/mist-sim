@@ -6,6 +6,7 @@
 |---|---|
 |raw/|共享原始图像、权重和下载元数据|
 |processed/|由剖析程序导出的数值组件|
+|profiling/|data_index.json来源索引、剖析统计表和观测；measurements/保留生成输入所必需的原始测量|
 |LOCAL_SOURCES.md|既有测量来源、版本、许可及校验记录|
 |SCENARIO.md|条件场景参数及依据|
 

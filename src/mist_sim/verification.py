@@ -105,7 +105,7 @@ def main():
 def run_suite(root, workspace, run_tests=True):
     config = load_config(root / "configs" / "smoke.json")
     config["reward_normalization"]["enabled"] = True
-    output_dir = workspace / "runs"
+    output_dir = workspace / "logs/runs"
     suite = RunStore(root, config, "python -m mist_sim.verification", config["seeds"]["train"], output_dir=output_dir)
     started = time.perf_counter()
     reports = []
@@ -155,19 +155,19 @@ def run_suite(root, workspace, run_tests=True):
                   "wall_seconds": time.perf_counter() - started}
         suite.write_json("summary.json", report)
         suite.finish()
-        write_json(workspace / "results" / "smoke_verification.json", report)
+        write_json(workspace / "reports" / "smoke_verification.json", report)
         for script, arguments in (
             ("verify_commands.py", ["--workspace", str(workspace)]),
-            ("inspect_logs.py", ["--suite", str(workspace / "results/smoke_verification.json"),
-                                 "--output", str(workspace / "results/chain_diagnostics.json")]),
+            ("inspect_logs.py", ["--suite", str(workspace / "reports/smoke_verification.json"),
+                                 "--output", str(workspace / "reports/chain_diagnostics.json")]),
             ("build_verification_index.py", ["--workspace", str(workspace)]),
         ):
             subprocess.run([sys.executable, str(root / "scripts/validation" / script), *arguments],
                            cwd=root, check=True, timeout=600)
         print(f"VERIFIED {suite.path}", flush=True)
-        diagnostics = json.loads((workspace / "results/chain_diagnostics.json").read_text(encoding="utf-8"))
-        artifacts = json.loads((workspace / "results/artifact_index.json").read_text(encoding="utf-8"))
-        commands = json.loads((workspace / "results/cli_verification.json").read_text(encoding="utf-8"))
+        diagnostics = json.loads((workspace / "reports/chain_diagnostics.json").read_text(encoding="utf-8"))
+        artifacts = json.loads((workspace / "reports/artifact_index.json").read_text(encoding="utf-8"))
+        commands = json.loads((workspace / "reports/cli_verification.json").read_text(encoding="utf-8"))
         return {"scope": report["scope"], "source": report["source"],
                 "unit_test_exit_code": test_exit_code, "unit_tests_skipped": not run_tests,
                 "measured_wall_seconds": time.perf_counter() - started,

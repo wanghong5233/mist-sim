@@ -10,7 +10,7 @@ INDEX = runpy.run_path(str(ROOT / "scripts/validation/build_verification_index.p
 
 
 def test_private_assets_rejected_and_source_allowed():
-    for name in ("results/curve.csv", "runs/one/weights.pt", "data/processed/profile.json", "SETUP.md",
+    for name in ("results/curve.csv", "logs/runs/one/weights.pt", "data/processed/profile.json", "SETUP.md",
                  ".env", "private.key", "references/MERA/README.md", "EXPERIMENT_PROTOCOL.md"):
         assert PUBLISH["private_path"](name)
     for name in ("README.md", "src/mist_sim/training.py", "configs/smoke.json", "data/README.md",

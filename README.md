@@ -4,7 +4,7 @@
 
 ## 仓库与隐私
 
-远端为私有仓库`wanghong5233/mist-sim`。只提交源码、配置、测试及必要说明；results、runs、data中的实测资产、权重、原始图像、实验协议和本机执行记录均忽略，论文不在此仓库内。推送前执行`python scripts/maintenance/check_publish.py`，检查当前暂存内容与历史；首次建库不导入科研根仓库历史。Git提交使用GitHub noreply邮箱。
+远端为私有仓库`wanghong5233/mist-sim`。只提交源码、配置、测试及必要说明；results、logs、data中的实测资产、权重、原始图像、实验协议和本机执行记录均忽略，论文不在此仓库内。推送前执行`python scripts/maintenance/check_publish.py`，检查当前暂存内容与历史；首次建库不导入科研根仓库历史。Git提交使用GitHub noreply邮箱。
 
 本机布局为`02_实验/mist-sim/`。科研父仓库以子模块记录这个独立仓库的提交，不重复管理源码；提交/推送仿真时进入mist-sim。克隆本仓库无需导师论文或MERA检出即可运行合成输入检查；数据恢复见[data说明](data/README.md)。父仓库只在本地更新引用，不随仿真push上传。
 
@@ -17,7 +17,7 @@
 |[scripts/README.md](scripts/README.md)|可执行脚本索引|
 |[AGENTS.md](AGENTS.md)|执行与文档维护约束|
 
-README管导航和命令；IMPLEMENTATION管当前语义；配置JSON管实际值。实验协议、SETUP、本地结果核验说明及父项目PLAN保留在本机，不上传。修改替换旧描述、链接复用，Git负责源码历史。
+README管导航和命令；IMPLEMENTATION管当前语义；配置JSON管实际值。实验协议和SETUP保留在本机，不上传。修改替换旧描述、链接复用，Git负责源码历史。
 
 ## 目录
 
@@ -27,13 +27,15 @@ mist-sim/
 ├── src/mist_sim/  唯一可安装源码；环境、PPO、基线、数据与指标
 ├── tests/         手算、反例、训练及恢复回归测试
 ├── scripts/       data/数据处理，validation/核验，maintenance/维护
-├── data/          raw/共享原始输入，processed/可复用剖面
-├── runs/          正式执行的原始轨迹、配置、日志和检查点
-├── results/       profiling/剖面、validation/核验、diagnostics/诊断、maintenance/维护
+├── data/          raw/原始输入，profiling/剖析及来源，processed/仿真数值输入
+├── logs/runs/     正式训练/评价的运行记录，执行时创建
+├── results/       正式实验汇总表和论文图，产生结果时创建
 └── references/    只读上游参考，不是运行依赖
 ```
 
-采用[Python标准src布局](https://packaging.python.org/en/latest/discussions/src-layout-vs-flat-layout/)，不再外套mist_sim目录、不按版本复制源码。测试原始文件和权重使用系统临时目录，默认退出清理；不把工程短跑混入正式runs。真实训练成功/失败均保留，不按性能好坏删除。
+采用[Python标准src布局](https://packaging.python.org/en/latest/discussions/src-layout-vs-flat-layout/)。日志采用“一个运行一个目录”：PyTorch的[SummaryWriter](https://docs.pytorch.org/docs/stable/tensorboard.html)支持指定log_dir，[CleanRL PPO](https://github.com/vwxyzjn/cleanrl/blob/fe8d8a03c41a7ef5b523e2e354bd01c363e786bb/cleanrl/ppo.py)按run_name隔离事件。本项目统一指定logs/runs，不依赖工具的默认顶层runs目录；该路径是项目约定，并非唯一行业标准。
+
+测试文件和权重在系统临时目录，退出清理；检查/维护脚本默认只打印，确需排障才显式指定输出到tmp。数据剖析归data，不算强化学习实验结果。尚未正式训练时logs/runs与results不放占位文件，也不提前生成空分类。正式训练成功/失败均保留，不按性能好坏删除。
 
 ## 环境与输入
 
@@ -74,28 +76,41 @@ mist-sim/
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim check --config configs/smoke.json
 & D:/Anaconda/envs/pytorch/python.exe scripts/maintenance/check_publish.py
 & D:/Anaconda/envs/pytorch/python.exe scripts/validation/check_rollouts.py
-& D:/Anaconda/envs/pytorch/python.exe -m mist_sim.verification --summary results/validation/rl_chain_check.json
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim.verification
 & D:/Anaconda/envs/pytorch/python.exe scripts/validation/check_profile_chain.py
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method hpgi --dry-run
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method hpgi --seed 4200001
-& D:/Anaconda/envs/pytorch/python.exe -m mist_sim evaluate --checkpoint runs/<训练ID>/checkpoints/final.pt --seed 4400019
-& D:/Anaconda/envs/pytorch/python.exe -m mist_sim replay --checkpoint runs/<训练ID>/checkpoints/final.pt --records runs/<评价ID>/traces/evaluation.json
-& D:/Anaconda/envs/pytorch/python.exe -m mist_sim summarize --records runs/<评价ID>/traces/evaluation.json
-& D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --checkpoint runs/<训练ID>/checkpoints/last.pt --extra-cycles 1
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim evaluate --checkpoint logs/runs/<训练ID>/checkpoints/final.pt --seed 4400019
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim replay --checkpoint logs/runs/<训练ID>/checkpoints/final.pt --records logs/runs/<评价ID>/traces/evaluation.json
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim summarize --records logs/runs/<评价ID>/traces/evaluation.json
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --checkpoint logs/runs/<训练ID>/checkpoints/last.pt --extra-cycles 1
 ```
 
 占位ID替换为实际运行路径；学习方法必须加载自己的权重。`--overlay 文件.json`和`--set ppo.learning_rate=0.0001`严格覆盖配置，未知键报错；上下层可通过ppo_layers独立配置。变更源码/配置/剖面后拒绝无说明续训。
 
 ## 日志与资产
 
-每个正式run用用途-方法-seed命名，加后缀防覆盖；resolved_config及manifest记录配置、源码/输入哈希、种子、耗时和状态。progress.jsonl保存完整事件；stdout.log和终端逐epoch显示actor/value loss、熵、KL、clip fraction及耗时；metrics.jsonl保存阶段物理指标。原始数据按`traces/inputs/`、`traces/phases/<阶段>/`、`traces/validation/`分组；阶段内behavior/rollout/inputs/update/physical.json分别对应行为、样本摘要、输入诊断、更新及执行。旧格式保持只读兼容。
+每个正式运行位于logs/runs/<用途-方法-种子>/，同一次运行的材料放在一起，防止日志和权重错配；自动后缀仅防覆盖。目录固定为：
+
+```text
+logs/runs/<运行名>/
+├── resolved_config.json、manifest.json   配置、输入/源码哈希、运行状态
+├── stdout.log、stderr.log               可读进度、错误
+├── progress.jsonl、metrics.jsonl        阶段事件、奖励/loss/物理指标
+├── tensorboard/                        学习曲线事件
+├── checkpoints/                        保存与恢复训练状态
+├── traces/                             inputs/、phases/<阶段>/、validation/
+└── summary.json、validation_history.json、selection.json
+```
+
+日志用于观察训练过程，traces用于复算，checkpoints用于恢复。summary.json是单次运行的小结；多个正式运行的统计、对照表和论文图才导出到results/<实验主题>/，记录来源运行和生成命令。results不放代码检查报告。
 
 当前HPGI：128槽一个episode；每次快层rollout为1024个transition，慢层为256个区间transition（Q4时同为1024槽）；采样后最多遍历2个PPO epoch。epoch不包含新的episode，不是重新采样。配置总量8192预训练槽＋28次慢/快交替＝65536训练槽，校准/验证另计；`--dry-run`零采样显示实际方法的用量。
 
 conditional配置默认启用TensorBoard，合成测试默认关闭。打开曲线：
 
 ```powershell
-& D:/Anaconda/envs/pytorch/python.exe -m tensorboard.main --logdir runs --host 127.0.0.1 --port 6006
+& D:/Anaconda/envs/pytorch/python.exe -m tensorboard.main --logdir logs/runs --host 127.0.0.1 --port 6006
 ```
 
 浏览器访问http://127.0.0.1:6006。`ppo/upper|lower`横轴为该层累计epoch，`train/*`和`validation/*`横轴为累计训练物理槽。重点看固定验证输入的原始回报、成本与服务率，再用loss/KL/熵/梯度排障；PPO loss不要求单调下降。训练奖励尺度变化单独记录，不与原始回报混用。
@@ -104,4 +119,4 @@ conditional配置默认启用TensorBoard，合成测试默认关闭。打开曲�
 
 检查点保存网络、优化器、统计、随机状态、epoch计数及完成阶段。默认initial/last/final/best/selected，阶段快照关闭；显式开启须设上限。best为开发选择，final为最终状态；没有服务阈值时不能称best满足论文业务要求。正常恢复用last/initial。
 
-完整验证套件默认临时空间，退出删除原始轨迹与权重；仅显式`--keep-artifacts tmp/debug-example`保留排障资料。results按用途替换当前摘要，不按日期/轮次堆副本；生成脚本默认写入对应子目录。正式图表按实验问题建主题目录，记录来源run和生成命令；测试数值不进入论文性能表。
+完整验证套件默认系统临时空间，退出删除轨迹、报告与权重；仅显式`--keep-artifacts tmp/debug-example`保留排障现场，用完删除，不归档。检查结论必要时简短写入SETUP，详细证据可由tests和脚本重建。测试数值不进入论文性能表。

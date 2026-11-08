@@ -15,8 +15,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, required=True)
     workspace = parser.parse_args().workspace.resolve()
-    output_dir = workspace / "runs"
-    report = json.loads((workspace / "results" / "smoke_verification.json").read_text(encoding="utf-8"))
+    output_dir = workspace / "logs/runs"
+    report = json.loads((workspace / "reports" / "smoke_verification.json").read_text(encoding="utf-8"))
     case = next(case for case in report["cases"] if case["method"] == "hpgi" and case["horizon"] == 16)
     checkpoint = output_dir / case["run_id"] / "checkpoints" / "final.pt"
     config = load_config(root / "configs" / "smoke.json")
@@ -68,7 +68,7 @@ def main():
                   "expected_failure_retained": True}
         store.write_json("summary.json", result)
         store.finish()
-        write_json(workspace / "results" / "cli_verification.json", result)
+        write_json(workspace / "reports" / "cli_verification.json", result)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except BaseException as error:
         store.finish(error)

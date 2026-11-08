@@ -121,14 +121,16 @@ def main():
     sys.stdout.reconfigure(encoding="utf-8")
     torch.set_num_threads(1)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run", type=Path, default=Path("runs/hpgi-development-cost-probe-seed4210002"))
+    parser.add_argument("--run", type=Path, required=True)
+    parser.add_argument("--output", type=Path, help="Optional historical diagnostic output; default prints only")
     args = parser.parse_args()
     config = load_config(Path("configs/conditional.json"))
     report = inspect(config, args.run)
     started = time.perf_counter()
     report["corrected_calibration"] = check_calibration(config, args.run)
     report["corrected_calibration_seconds"] = time.perf_counter() - started
-    write_json(Path("results/diagnostics/training_design_check.json"), report)
+    if args.output:
+        write_json(args.output, report)
     print(json.dumps(dict(reward_units=report["config_reward_units"], network=report["network"],
                          witnesses=report["same_trace_witnesses"], seconds=report["measured_seconds"]), indent=2))
 

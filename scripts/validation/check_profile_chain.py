@@ -20,7 +20,7 @@ def main():
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=root / "configs/conditional.json")
-    parser.add_argument("--summary", type=Path, default=root / "results/validation/profile_chain_check.json")
+    parser.add_argument("--summary", type=Path, help="Optional diagnostic output; default prints only")
     args = parser.parse_args()
     config = load_config(args.config)
     if config["method"] != "hpgi":
@@ -32,7 +32,7 @@ def main():
     started = time.perf_counter()
     with validation_workspace() as workspace:
         store = RunStore(root, config, "check_profile_chain correctness", config["seeds"]["train"],
-                         output_dir=workspace / "runs")
+                         output_dir=workspace / "logs/runs")
         trainer = Trainer(config, config["seeds"]["train"], store)
         try:
             trainer.run(max_seconds=180)
@@ -91,10 +91,12 @@ def main():
                 raw_artifact_retention="Disposable temporary directory; no retained weights or traces")
         except BaseException as error:
             store.finish(error)
-            write_json(args.summary, dict(status="failed", error=repr(error), source=store.manifest["source"],
-                                         measured_wall_seconds=time.perf_counter() - started))
+            if args.summary:
+                write_json(args.summary, dict(status="failed", error=repr(error), source=store.manifest["source"],
+                                             measured_wall_seconds=time.perf_counter() - started))
             raise
-    write_json(args.summary, report)
+    if args.summary:
+        write_json(args.summary, report)
     print(json.dumps({key: value for key, value in report.items() if key not in ("source", "config", "stages")}, indent=2))
 
 

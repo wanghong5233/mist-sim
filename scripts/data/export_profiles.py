@@ -18,7 +18,7 @@ def main():
     selection.add_argument("--verify-saved", action="store_true")
     args = parser.parse_args()
     if args.verify_saved:
-        index = json.loads((root / "results/profiling/data_index.json").read_text(encoding="utf-8"))
+        index = json.loads((root / "data/profiling/data_index.json").read_text(encoding="utf-8"))
         for label in ("processed", "summary", "observations"):
             if digest_file(root / index[label + "_path"]) != index[label + "_sha256"]:
                 raise AssertionError(f"Changed exported asset: {label}")
@@ -45,7 +45,7 @@ def main():
     components, rows, checks = export_profiles(records, run_id)
     output = root / "data/processed" / ("dnn_profiles_" + run_id + ".json")
     write_json(output, components)
-    table = root / "results/profiling/dnn_profile_summary.csv"
+    table = root / "data/profiling/dnn_profile_summary.csv"
     table.parent.mkdir(parents=True, exist_ok=True)
     with table.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
@@ -57,12 +57,12 @@ def main():
             for split in device["splits"]:
                 split.pop("prefix_graph", None)
                 split.pop("suffix_graph", None)
-    observations = root / "results/profiling/profile_observations.json"
+    observations = root / "data/profiling/profile_observations.json"
     write_json(observations, records)
     index = {"source_run": run_id, "run_path": run.relative_to(root).as_posix(), "source_commit": manifest["source"]["commit"],
              "export_source": source_identity(root),
              "source_files": manifest["source"]["files"], "raw_manifest_sha256": digest_file(run / "manifest.json"),
-             "raw_measurements": {(Path("runs") / run.name / "traces" / (name + ".json")).as_posix(): digest_file(run / "traces" / (name + ".json")) for name in spec["models"]},
+             "raw_measurements": {(run.relative_to(root) / "traces" / (name + ".json")).as_posix(): digest_file(run / "traces" / (name + ".json")) for name in spec["models"]},
              "processed_path": output.relative_to(root).as_posix(), "processed_sha256": digest_file(output),
              "summary_path": table.relative_to(root).as_posix(), "summary_sha256": digest_file(table),
              "observations_path": observations.relative_to(root).as_posix(), "observations_sha256": digest_file(observations),
@@ -71,11 +71,11 @@ def main():
              "measurement_config": spec,
              "assets": assets, "verification": checks, "constant_rate_diagnostics": components["constant_rate_diagnostics"],
              "training_ready": False, "missing_calibrations": components["missing_calibrations"],
-             "rebuild_saved_data": f"python scripts/data/export_profiles.py --run runs/{run.name}",
+             "rebuild_saved_data": f"python scripts/data/export_profiles.py --run {run.relative_to(root).as_posix()}",
              "verify_without_hardware_or_original_assets": "python scripts/data/export_profiles.py --verify-saved",
-             "remeasure": ["python scripts/data/profile_models.py", "python scripts/data/export_profiles.py --run runs/<new_run_id>"],
+             "remeasure": ["python scripts/data/profile_models.py", "python scripts/data/export_profiles.py --run data/profiling/measurements/<new_run_id>"],
              "reproduction_note": "Structural values and outputs are reproducible; timings/memory are device/runtime dependent, not bitwise targets"}
-    write_json(root / "results/profiling/data_index.json", index)
+    write_json(root / "data/profiling/data_index.json", index)
     print(json.dumps({"processed": str(output), **checks, "training_ready": False}, ensure_ascii=False, indent=2))
 
 

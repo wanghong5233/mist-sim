@@ -26,7 +26,8 @@ def main():
         assets = json.loads((args.run / "assets.json").read_text(encoding="utf-8"))
         profile_model(root, args.worker, spec, assets, args.run / f"traces/{args.worker}.json")
         return
-    store = RunStore(root, dict(spec, profiles={}), " ".join(sys.argv), spec["seed"])
+    store = RunStore(root, dict(spec, profiles={}), " ".join(sys.argv), spec["seed"],
+                     output_dir=root / "data/profiling/measurements")
     store.manifest.update(device=spec["devices"], budget={
         "kind": "offline inference profiling; no training",
         "per_model_timeout_seconds": spec["per_model_timeout_seconds"],
@@ -61,7 +62,7 @@ def main():
         store.write_json("summary.json", {"models_completed": completed, "prepare_only": args.prepare_only,
                                           "measurement_wall_seconds": time.perf_counter() - computation_started})
         store.finish()
-        write_json(root / "results/profiling/profiling_run.json", {"run_id": store.path.name, "prepare_only": args.prepare_only,
+        write_json(root / "data/profiling/profiling_run.json", {"run_id": store.path.name, "prepare_only": args.prepare_only,
                                                         "manifest_sha256": digest_file(store.path / "manifest.json")})
         print(f"FINISHED {store.path}", flush=True)
     except BaseException as error:

@@ -8,10 +8,10 @@ from pathlib import Path
 def main():
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=root / "results/maintenance/run_catalog.csv")
+    parser.add_argument("--output", type=Path, help="Optional CSV export; default prints only")
     args = parser.parse_args()
     rows = []
-    for directory in sorted((root / "runs").glob("*")):
+    for directory in sorted((root / "logs/runs").glob("*")):
         if not directory.is_dir():
             continue
         manifest_path = directory / "manifest.json"
@@ -32,13 +32,14 @@ def main():
                      "checkpoint_bytes": sum(path.stat().st_size for path in checkpoints),
                      "path": directory.relative_to(root).as_posix(), "command": command})
     fields = ["run_id", "kind", "status", "source_commit", "disk_bytes", "checkpoint_count", "checkpoint_bytes", "path", "command"]
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.output.open("w", encoding="utf-8", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows(rows)
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        with args.output.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(rows)
     print(json.dumps({"runs": len(rows), "bytes": sum(row["disk_bytes"] for row in rows),
-                      "checkpoints": sum(row["checkpoint_count"] for row in rows)}, indent=2))
+                      "checkpoints": sum(row["checkpoint_count"] for row in rows), "entries": rows}, indent=2))
 
 
 if __name__ == "__main__":

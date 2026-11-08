@@ -56,7 +56,7 @@ def main(argv=None):
         raise ValueError("Checkpoint overrides require explicit --config for compatibility checking")
     if args.command == "check" and args.output_dir is None:
         with validation_workspace() as workspace:
-            args.output_dir = workspace / "runs"
+            args.output_dir = workspace / "logs/runs"
             execute(args)
         print("Check passed; temporary artifacts removed")
         return None
@@ -94,7 +94,7 @@ def execute(args):
         return schedule
     if config["fixture_kind"] == "synthetic_hand_calculation" and args.output_dir is None:
         with validation_workspace() as workspace:
-            args.output_dir = workspace / "runs"
+            args.output_dir = workspace / "logs/runs"
             run_command(args, config, trainer)
         print("Synthetic check finished; temporary artifacts removed")
         return None

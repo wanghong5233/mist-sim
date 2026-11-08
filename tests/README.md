@@ -4,4 +4,4 @@
 
 运行：python -m pytest tests -q。test_physics.py覆盖物理、匿名、资源与有界搜索；test_learning.py覆盖联合概率、掩码、GAE、冻结、归一化、尾区间和完整恢复。
 
-python -m mist_sim.verification先执行这些测试，再完成全部方法16/17隙短验证及HPGI续训，并在同一个临时空间完成CLI/日志核验；退出后自动删除权重、轨迹和索引，不写正式runs/results。pytest的tmp_path也随用随清。仅需保留排障现场时显式指定--keep-artifacts 新目录；后续处理完自行清理，不默认归档。无性能阈值，不要求收敛。独立SciPy对照可能报告SLSQP尝试点被裁到界内的警告，必须以收敛状态及最终目标差判定。
+python -m mist_sim.verification先执行这些测试，再完成全部方法16/17隙短验证及HPGI续训，并在同一个临时空间完成CLI/日志核验；退出后自动删除权重、轨迹和索引，不写正式logs/runs/results。pytest的tmp_path也随用随清。仅需保留排障现场时显式指定--keep-artifacts 新目录；后续处理完自行清理，不默认归档。无性能阈值，不要求收敛。独立SciPy对照可能报告SLSQP尝试点被裁到界内的警告，必须以收敛状态及最终目标差判定。

@@ -7,7 +7,7 @@
 |data/|profile_models.py|官方模型及输入准备、串行离线测量|
 |data/|export_profiles.py --verify-saved|导出/复算已保存剖面|
 |data/|check_inputs.py|输入、物理和重放检查；默认临时运行|
-|validation/|check_rollouts.py|当前配置完整快/慢rollout，打印transition、独立复算GAE/后继/概率/物理；不更新参数，仅保留轻量摘要|
+|validation/|check_rollouts.py|当前配置快/慢rollout及GAE/概率/物理复算；默认仅打印，--summary可显式导出排障摘要|
 |validation/|check_profile_chain.py|真实剖面的48槽正确性短更新、重载和续训一致性，退出清理原始产物|
 |validation/|inspect_logs.py|复算已有轨迹、PPO及物理中间量|
 |validation/|report_hpgi_probe.py --run 路径|检查既有训练资产、日志及耗时；不继续训练|
@@ -20,6 +20,6 @@
 |maintenance/|catalog_runs.py|只读运行资产盘点|
 |maintenance/|archive_runs.ps1、restore_run.ps1|既有历史资产工具，按明确任务使用，不是测试产物默认流程|
 
-持久输出统一放results子目录：data导出写profiling，正确性摘要写validation，开发诊断写diagnostics，仓库/运行清单写maintenance。临时验证套件内部的工作文件随临时目录删除，不复制到工程results顶层。
+profile_models与export_profiles的持久输出在data/profiling，数值输入在data/processed。检查、诊断、维护脚本默认打印到终端；--output或--summary仅用于显式排障导出（放tmp，用完删除）。验证套件的reports和logs/runs均位于系统临时空间，退出删除。results只用于正式实验图表，不能作为检查脚本的默认落盘目录。
 
 训练用量预览用`python -m mist_sim train --config configs/conditional.json --dry-run`；TensorBoard与停止/恢复命令在README维护。测试产物默认临时目录、退出删除；需要保留排障原始文件时显式指定新目录。正式结果保留成功和失败。不创建空plots目录；有绘图入口时再增加。

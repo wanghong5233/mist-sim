@@ -84,7 +84,7 @@ class RunStore:
         identifier = run_id or readable_run_id(config, command, seed)
         if Path(identifier).name != identifier or identifier in (".", ".."):
             raise ValueError("Invalid run id")
-        self.path = (Path(output_dir).resolve() if output_dir is not None else self.root / "runs") / identifier
+        self.path = (Path(output_dir).resolve() if output_dir is not None else self.root / "logs" / "runs") / identifier
         self.path.mkdir(parents=True, exist_ok=False)
         self.started = time.perf_counter()
         self.monitor = None

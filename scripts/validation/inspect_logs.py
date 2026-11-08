@@ -18,10 +18,10 @@ def main():
     if args.suite:
         suite = json.loads(args.suite.read_text(encoding="utf-8"))
         root = args.suite.resolve().parents[1]
-        paths += [root / "runs" / case["run_id"] for case in suite["cases"]]
-        paths.append(root / "runs" / suite["resume_run_id"])
+        paths += [root / "logs/runs" / case["run_id"] for case in suite["cases"]]
+        paths.append(root / "logs/runs" / suite["resume_run_id"])
     if not paths:
-        parser.error("Provide run paths or --suite results/smoke_verification.json")
+        parser.error("Provide run paths or --suite reports/smoke_verification.json")
     cases = [inspect_run(path) for path in paths]
     report = {"runs": cases, "update_samples": sum(update["samples"] for case in cases for update in case["updates"]),
               "minibatches": sum(update["minibatches"] for case in cases for update in case["updates"]),

@@ -44,7 +44,7 @@ def check_inputs(root, workspace):
     for method in METHODS:
         for_method(config, method)
     seed = 4100017
-    store = RunStore(root, config, "scripts/data/check_inputs.py; no training", seed, output_dir=workspace / "runs")
+    store = RunStore(root, config, "scripts/data/check_inputs.py; no training", seed, output_dir=workspace / "logs/runs")
     store.manifest["budget"] = "One fixed 128-slot input check; no policy optimization"
     try:
         trace = generate_trace(config, seed)
@@ -60,7 +60,7 @@ def check_inputs(root, workspace):
         store.write_json("traces/evaluation.json", records)
         store.write_json("summary.json", metrics)
         store.finish()
-        write_json(workspace / "results/input_readiness.json", {
+        write_json(workspace / "reports/input_readiness.json", {
             "run_id": store.manifest["run_id"], "run_path": store.path.relative_to(workspace).as_posix(), "source": store.manifest["source"],
             "config": "configs/conditional.json", "all_methods_load": list(METHODS),
             "deterministic_generation": True, "physics_and_replay_passed": True,
