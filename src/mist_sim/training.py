@@ -123,6 +123,7 @@ class Trainer:
             trajectory, metrics = evaluate(self.controller, self.config, trace, check_budget=self.check_budget)
             records.extend(trajectory)
             per_trajectory.append(dict(seed=seed, metrics=metrics))
+            self.event("validation_progress", completed=len(per_trajectory), total=len(self.validation_seeds()))
         return records, summarize(records), per_trajectory
 
     def calibrate(self):
@@ -327,6 +328,7 @@ class Trainer:
                 self.save(directory / f"snapshot_{name}.pt")
                 trim_snapshots(directory, "snapshot_*.pt", policy["keep_stages"])
         self.event("phase_completed", stage=name, layer=layer, service=metrics["on_time_rate"],
+                   loss=metrics["loss"],
                    energy=metrics["total_energy"], cost=metrics["conservative_cost"],
                    joint_kl=metrics["post_update_joint_kl"], frozen_unchanged=True,
                    raw_reward_per_slot=sum(record["reward"] for record in records) / len(records),

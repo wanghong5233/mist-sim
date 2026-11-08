@@ -84,7 +84,7 @@ PPO更新通过`policies/batching.py`执行真正的小批张量前向/反向：
 
 `runtime.torch_threads`可配置CPU算子线程数，默认1；小网络串行采样与批量更新对线程数的收益不同，需按整条链路实测，不能用线程数推断并行效率。`scripts/validation/benchmark_batching.py`默认使用合成变长输入，也可传--behavior读取已有轨迹，只测量不写结果或更新权重。
 
-终端逐epoch输出，TensorBoard记录上下层累计epoch轴以及训练/验证物理槽轴，关闭writer后才计算文件哈希。原始episode回报和固定验证回报不受归一化尺度影响；训练奖励/尺度/裁剪次数另列。具体命令、停止开关和目录说明只在README维护。
+终端按完整交替轮次显示Iteration及三个步骤：服务器PPO、调度PPO、联合评价。采样、epoch和评价轨迹进度使用tqdm临时单行，结束清除；非交互输出省略进度条。每轮摘要记录联合评价原始平均episode回报、成本/时隙、按时率及两个组件各自的样本加权平均loss，不把两层loss合成整体目标。详细逐epoch诊断仍写stdout.log、progress.jsonl和TensorBoard；关闭writer后才计算文件哈希。既有CSV的iteration字段仍是组件更新计数，完整轮次应从stage的cycle编号加1取得；不改写历史结果。原始episode回报和固定验证回报不受归一化尺度影响；训练奖励/尺度/裁剪次数另列。具体命令、停止开关和目录说明只在README维护。
 
 - [CleanRL PPO](https://github.com/vwxyzjn/cleanrl/blob/fe8d8a03c41a7ef5b523e2e354bd01c363e786bb/cleanrl/ppo.py)：fe8d8a03c41a7ef5b523e2e354bd01c363e786bb，MIT；正交初始化、Adam、GAE、clip/KL/梯度经验参考，没有复制源码文件。
 - [SB3](https://github.com/DLR-RM/stable-baselines3/tree/0cdcd200deef06b9ad0af72f6ddfb07c06c6df39)：MIT；终止/截断、种子与评价核对。[MaskablePPO](https://github.com/Stable-Baselines-Team/stable-baselines3-contrib/tree/a8af63682070df0bda9707400b2e971055600910)：MIT；掩码语义核对，不调用其learn。

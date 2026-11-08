@@ -16,6 +16,38 @@ from mist_sim.training import Trainer, state_hash
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.parametrize("tty", [False, True])
+def test_console_groups_cycle_and_removes_temporary_progress(tty):
+    import io
+    from mist_sim.monitoring import ConsoleProgress
+    stream = io.StringIO()
+    stream.isatty = lambda: tty
+    console = ConsoleProgress(stream)
+    for layer in ("upper", "lower"):
+        console.record("phase_started", {"stage": "cycle_000_" + layer})
+        for count in (64, 128):
+            console.record("collect", {"samples": count, "target_samples": 128})
+        console.record("rollout_ready", {})
+        assert console.bar is None
+        for epoch in (1, 2):
+            console.record("ppo_epoch", {"epoch": epoch, "epoch_limit": 2})
+        console.record("phase_completed", dict(layer=layer, loss=0.25, joint_kl=0.001,
+                                               collection_seconds=1., update_seconds=2.))
+        assert console.bar is None
+    console.record("validation_started", {"stage": "cycle_000"})
+    console.record("validation_completed", dict(stage="cycle_000", service=0.5,
+                                                return_per_episode=-20., cost_per_slot=2.))
+    console.close()
+    output = stream.getvalue()
+    assert "Iteration 1 [1/3]" in output and "Iteration 1 [2/3]" in output
+    assert "Iteration 1 [3/3]" in output
+    assert output.count("reward/episode=") == 1
+    assert "服务器平均loss=0.25" in output and "调度平均loss=0.25" in output
+    assert "cycle_000" not in output
+    if not tty:
+        assert "64/128" not in output and "PPO epoch" not in output
+
+
 def small(config):
     config["horizon"] = 5
     config["k"] = 1

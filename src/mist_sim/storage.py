@@ -146,7 +146,7 @@ class RunStore:
         self.append_result("evaluation.csv", dict(identity, **evaluation_row(metrics)))
 
     def event(self, event, **fields):
-        from .monitoring import TrainingMonitor, format_event
+        from .monitoring import ConsoleProgress, TrainingMonitor, format_event
         if event in ("training_started", "phase_started") and self.monitor is None:
             self.monitor = TrainingMonitor(self.path / "tensorboard", self.monitoring["tensorboard"])
         record = dict(event=event, elapsed_seconds=time.perf_counter() - self.started, **fields)
@@ -157,12 +157,16 @@ class RunStore:
         if message:
             with (self.path / "stdout.log").open("a", encoding="utf-8") as stream:
                 stream.write(message + "\n")
-            if self.monitoring["console"]:
-                print(message, flush=True)
+        if self.monitoring["console"]:
+            if not hasattr(self, "console_progress"):
+                self.console_progress = ConsoleProgress()
+            self.console_progress.record(event, fields)
         if self.monitor is not None:
             self.monitor.record(event, fields)
 
     def finish(self, error=None, stopped=None):
+        if hasattr(self, "console_progress"):
+            self.console_progress.close()
         if self.monitor is not None:
             self.monitor.close()
         self.manifest.update(status="failed" if error else "stopped" if stopped else "completed", exit_code=1 if error else 0,
