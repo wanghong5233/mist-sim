@@ -16,6 +16,18 @@ from mist_sim.training import Trainer, state_hash
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_console_lifecycle_never_uses_slots_as_progress():
+    import io
+    from mist_sim.monitoring import ConsoleProgress
+    stream = io.StringIO()
+    console = ConsoleProgress(stream)
+    for event in ("training_started", "calibration_completed", "training_stopped", "training_completed"):
+        console.record(event, dict(total_slots=26624, reason="wall_time_limit"))
+    output = stream.getvalue()
+    assert "slots" not in output and "26624" not in output
+    assert "训练启动" in output and "wall_time_limit" in output
+
+
 @pytest.mark.parametrize("tty", [False, True])
 def test_console_groups_cycle_and_removes_temporary_progress(tty):
     import io

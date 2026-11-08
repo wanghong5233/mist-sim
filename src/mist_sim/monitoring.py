@@ -12,6 +12,8 @@ class ConsoleProgress:
         self.cycle = None
         self.started = None
         self.losses = {}
+        self.pretrain_total = 0
+        self.iteration_total = 0
 
     def close(self):
         if self.bar is not None:
@@ -39,12 +41,12 @@ class ConsoleProgress:
                 cycle = int(stage.split("_")[1]) + 1
                 if cycle != self.cycle:
                     self.cycle, self.started, self.losses = cycle, time.perf_counter(), {}
-                    self.write(f"\nIteration {cycle}")
+                    self.write(f"\nIteration {cycle}/{self.iteration_total or '?'}")
                 step, network = (1, "服务器开关网络") if stage.endswith("upper") else (2, "任务调度网络")
                 self.label = f"Iteration {cycle} [{step}/3] {network}"
             else:
-                self.label = (f"预训练第 {int(stage.split('_')[1]) + 1} 次更新"
-                              if stage.startswith("pretrain_") else "预训练最后一次更新")
+                number = int(stage.split('_')[1]) + 1 if stage.startswith("pretrain_") else self.pretrain_total
+                self.label = f"准备阶段：预训练 {number}/{self.pretrain_total or '?'}（尚未进入 Iteration 1）"
             self.write(self.label + "：采样 → PPO 更新")
         elif event == "collect":
             self.progress(self.label + " / 采样", fields["samples"], fields["target_samples"])
@@ -81,8 +83,17 @@ class ConsoleProgress:
             self.write(f"{label} | reward/episode={fields['return_per_episode']:.6g}"
                        f" | 成本/时隙={fields['cost_per_slot']:.6g} | 按时率={service_text}"
                        + sampled + (" | " + losses if losses else "") + timing)
-        elif event in ("training_started", "calibration_completed", "training_stopped", "training_completed"):
-            self.write(format_event(event, fields))
+        elif event == "training_started":
+            schedule = fields.get("schedule", {})
+            self.pretrain_total = schedule.get("pretrain_rollouts", 0)
+            self.iteration_total = schedule.get("cycles", 0)
+            self.write(f"训练启动：准备阶段（校准、预训练 {self.pretrain_total} 次） → Iteration 1～{self.iteration_total}")
+        elif event == "calibration_completed":
+            self.write("统计校准完成")
+        elif event == "training_stopped":
+            self.write(f"训练停止：{fields['reason']}")
+        elif event == "training_completed":
+            self.write("训练完成：已执行全部配置迭代")
 
 
 def format_event(event, fields):
