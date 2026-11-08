@@ -262,14 +262,13 @@ def test_greedy_reads_previous_complete_window(config):
 
 
 def test_resume_preserves_selected_weights_reference(config, tmp_path):
-    from types import SimpleNamespace
-    from mist_sim.storage import write_json, digest_file
+    from mist_sim.storage import RunStore, digest_file
     config["arrival_probability"] = 0
     config["validation"]["min_service_rate"] = None
-    first = tmp_path / "first"
-    second = tmp_path / "second"
-    first_store = SimpleNamespace(path=first, write_json=lambda name, value: write_json(first / name, value), event=lambda *args, **kwargs: None)
-    second_store = SimpleNamespace(path=second, write_json=lambda name, value: write_json(second / name, value), event=lambda *args, **kwargs: None)
+    root = Path(__file__).resolve().parents[1]
+    first_store = RunStore(root, config, "check", 23, run_id="first", output_dir=tmp_path)
+    second_store = RunStore(root, config, "check", 23, run_id="second", output_dir=tmp_path)
+    first, second = first_store.path, second_store.path
     trainer = Trainer(config, 23, first_store)
     trainer.calibrate()
     trainer.validate_cycle("cycle_000")

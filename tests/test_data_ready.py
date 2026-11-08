@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -55,12 +54,13 @@ def test_snapshot_retention_preserves_other_files(tmp_path):
 
 def test_selected_retention_and_resume_without_training(config, tmp_path):
     config["arrival_probability"] = 0
-    store = SimpleNamespace(path=tmp_path, write_json=lambda name, value: write_json(tmp_path / name, value), event=lambda *args, **kwargs: None)
+    from mist_sim.storage import RunStore
+    store = RunStore(Path(__file__).resolve().parents[1], config, "check", 23, run_id="retention", output_dir=tmp_path)
     trainer = Trainer(config, 23, store)
     for number in range(4):
         trainer.best_validation_cost = float("inf")
         trainer.validate_cycle(f"cycle_{number:03}")
-    assert len(list((tmp_path / "checkpoints").glob("selected_*.pt"))) == 1
-    selected = json.loads((tmp_path / "selection.json").read_text(encoding="utf-8"))
+    assert len(list((store.path / "checkpoints").glob("selected_*.pt"))) == 1
+    selected = json.loads((store.path / "selection.json").read_text(encoding="utf-8"))
     restored = Trainer.load(selected["checkpoint_path"])
     assert restored.best_stage == "cycle_003"

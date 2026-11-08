@@ -33,6 +33,8 @@ def describe_schedule(config, extra_cycles=0):
             "validation_trajectories_per_check": config.get("validation", {}).get("trajectories", 1),
             "stopping": config.get("stopping", {"max_slots": None, "max_seconds": None}),
             "ppo": {layer: {"epochs": settings["epochs"], "minibatch": settings["minibatch"],
+                              "learning_rate": settings["learning_rate"], "learning_rate_schedule": "constant",
+                              "learning_rate_warmup": False,
                               "minibatches_per_epoch": math.ceil(count / settings["minibatch"]),
                               "target_kl": settings["target_kl"]}
                     for layer, count, settings in _layers(config, lower, upper)},

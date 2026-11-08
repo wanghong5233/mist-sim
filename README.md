@@ -123,6 +123,10 @@ iterations.csv保存原始reward总和/每物理槽均值、归一化训练rewar
 
 当前HPGI：128槽一个episode；每次快层rollout为1024个transition，慢层为256个区间transition（Q4时同为1024槽）；采样后最多遍历2个PPO epoch。epoch不包含新的episode，不是重新采样。配置总量8192预训练槽＋28次慢/快交替＝65536训练槽，校准/验证另计；`--dry-run`零采样显示实际方法的用量。
 
+每个rollout使用新建on-policy buffer，保存状态、原动作前缀/掩码、旧联合logprob、价值、奖励、后继状态和终止/截断标志；更新时复算原动作概率，GAE处理bootstrap边界，更新后清空。当前minibatch=64，快层每epoch16批、慢层每epoch4批；2个epoch是可配置初值，不要求固定5–10次。KL超过0.03提前结束本次更新，下一次仍重新采样。
+
+学习率采用固定3e-4、无学习率warmup和余弦衰减，dry-run显式显示该选择。当前小型Tanh PPO先保持固定学习率以便判断采样及更新效果，不将大模型训练技巧作为必需项。已有256槽统计校准（不更新网络）及8192槽全开快层预训练；两者都不是学习率warmup。若后续实验引入衰减，须同时固定上下层进度定义、恢复状态和公平比较配置，不能在训练中途静默修改。
+
 conditional配置默认启用TensorBoard，合成测试默认关闭。打开曲线：
 
 ```powershell

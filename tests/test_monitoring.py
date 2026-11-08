@@ -169,3 +169,13 @@ def test_invalid_stopping_configuration(config, field, value):
     config["stopping"][field] = value
     with pytest.raises(ValueError):
         validate(config)
+
+
+def test_layer_discount_cannot_disagree_with_physical_reward(config):
+    from mist_sim.config import validate
+    config["ppo_layers"]["upper"] = {"gamma": 0.9}
+    with pytest.raises(ValueError, match="physical-slot"):
+        validate(config)
+    config["ppo"]["gamma"] = 0.9
+    config["ppo_layers"]["upper"] = {}
+    validate(config)

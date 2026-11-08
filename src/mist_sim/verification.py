@@ -118,7 +118,9 @@ def run_suite(root, workspace, run_tests=True):
             (suite.path / "unit_tests_stderr.log").write_bytes(tested.stderr)
             test_exit_code = tested.returncode
             if test_exit_code:
-                raise RuntimeError(f"Unit tests failed, see {suite.path}")
+                print(tested.stdout.decode("utf-8", errors="replace"), flush=True)
+                print(tested.stderr.decode("utf-8", errors="replace"), flush=True)
+                raise RuntimeError("Unit tests failed; diagnostics printed before temporary cleanup")
         for horizon in (16, 17):
             for method in METHODS:
                 if time.perf_counter() - started > 3600:
