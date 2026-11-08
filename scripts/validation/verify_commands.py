@@ -25,11 +25,12 @@ def main():
 
     def command(arguments, expected=0):
         before = set(output_dir.iterdir())
-        result = subprocess.run([sys.executable, "-m", "mist_sim", *map(str, arguments), "--output-dir", str(output_dir)],
+        result = subprocess.run([sys.executable, "-m", "mist_sim", *map(str, arguments),
+                                 "--root", str(root), "--output-dir", str(output_dir)],
                                 cwd=root.parent, capture_output=True, timeout=180)
         new_paths = set(output_dir.iterdir()) - before
         if len(new_paths) != 1:
-            raise AssertionError("Command did not create exactly one run")
+            raise AssertionError("Command did not create exactly one run: " + result.stderr.decode(errors="replace"))
         path = new_paths.pop()
         manifest = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
         if result.returncode != expected or manifest["exit_code"] != expected:
