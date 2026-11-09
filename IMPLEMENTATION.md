@@ -46,7 +46,7 @@
 
 `ppo.value_target=gae`保留critic的GAE lambda-return `A+V_old`对照；`sampled_return`改用当前采样片段的实际折扣奖励和，真实终止不bootstrap、采样截断及buffer末端用已保存的后继value。两种模式都保持actor原始GAE不变。日志分别列gae_value_target、critic_target及segment_return_with_bootstrap，不能混称。actor默认整层rollout标准化`(A−mean(A))/max(std(A),1e−8)`，phase模式按组件计算；单样本不去均值。gamma=1保持有限时域未折扣目标；lambda=.95的TD权重约20个决策步，不等于只需20条训练数据。
 
-`ppo.value_model=plain`保留原MLP价值函数。`finite_horizon`令n为公开context的剩余物理槽数，D(n)=sum(gamma^i,i=0..n−1)，价值为`V=s×[b×D(n)+f(state)×D(n)/D(H)]`；s为原value_scale，b为过去真实物理奖励均值转换到内部单位，H为episode长度。只在采样前用过去统计更新b，采样和PPO期间冻结；两组件使用同一均值，各自学习状态残差f。初始残差输出为0，不改变actor初始化随机流。剩余一槽的价值包含最后一次奖励；n=0才为0。该参数化防止整个时域的累积回报偏移挤入终止状态，不添加私有信息或新reward。均值、scale及运行统计保存恢复，串行、批量、CPU/CUDA和worker快照共用一条value计算路径。
+`ppo.value_model=plain`保留原MLP价值函数。`finite_horizon`令n为公开context的剩余物理槽数，D(n)=sum(gamma^i,i=0..n−1)，价值为`V=s×[b×D(n)+f(state)×D(n)/D(H)]`；s为原value_scale，b为过去真实物理奖励均值转换到内部单位，H为episode长度。只在采样前用过去统计更新b，采样和PPO期间冻结；两组件使用同一均值，各自学习状态残差f。初始残差输出为0，不改变actor初始化随机流。剩余一槽的价值包含最后一次奖励；n=0才为0。该参数化防止整个时域的累积回报偏移挤入终止状态，不添加私有信息或新reward。均值、scale及运行统计保存恢复，串行、批量、CPU/CUDA和worker快照共用一条value计算路径。折扣时域使用log/expm1稳定计算，gamma=0和1单独处理，避免接近1时float32消减使价值与残差梯度归零。
 
 联合logprob按原请求顺序/动作前缀重算并求和；容量掩码参与条件概率。PPO裁剪比率区间[.8,1.2]；loss=actor+.5×(.5×MSE)−.01×entropy。空动作时隙仍更新critic，actor项为零。HPGI及其交替变体分别on-policy采样，另一层更新后不复用上一阶段轨迹；joint_ppo使用同一快照的事件buffer联合更新，见方法章节。actor/critic各自裁剪梯度范数至.5，Adam lr=3e−4/eps=1e−5；全buffer更新后联合KL>.03提前结束epoch。详细逐批中间量可独立复算。
 
