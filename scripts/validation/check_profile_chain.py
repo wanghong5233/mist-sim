@@ -21,19 +21,26 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=root / "configs/conditional.json")
     parser.add_argument("--summary", type=Path, help="Optional diagnostic output; default prints only")
+    parser.add_argument("--overlay", type=Path, action="append", default=[])
+    parser.add_argument("--set", dest="overrides", action="append", default=[])
     args = parser.parse_args()
-    config = load_config(args.config)
+    config = load_config(args.config, overlays=args.overlay, overrides=args.overrides)
     if config["method"] != "hpgi":
         raise ValueError("This bounded check targets HPGI")
     config["training"].update(pretrain_slots=16, fast_slots=16, slow_intervals=4, cycles=1)
     config["ppo"]["epochs"] = 1
-    config["ppo_layers"] = {"upper": {}, "lower": {}}
+    for settings in config["ppo_layers"].values():
+        if "epochs" in settings:
+            settings["epochs"] = 1
+    config["diagnostics"]["phase_interval"] = 1
+    config["trace_retention"].update(phases=None, inputs=None)
     config["validation"]["trajectories"] = 1
     started = time.perf_counter()
     with validation_workspace() as workspace:
         store = RunStore(root, config, "check_profile_chain correctness", config["seeds"]["train"],
                          output_dir=workspace / "logs/runs")
         trainer = Trainer(config, config["seeds"]["train"], store)
+        restored = None
         try:
             trainer.run(max_seconds=180)
             trained_slots = trainer.total_slots
@@ -42,7 +49,7 @@ def main():
             assert_close(metrics, replay(config, records))
             for key, value in independent_totals(config, records).items():
                 assert_close(value, metrics[key], key)
-            checkpoint = store.path / "checkpoints/final.pt"
+            checkpoint = store.path / "checkpoints" / ("last.pt" if trainer.minimal_checkpoints else "final.pt")
             trainer.phase("resume_check", "upper", 2)
             continued = copy.deepcopy(trainer.controller.state_dict())
             restored = Trainer.load(checkpoint)
@@ -52,16 +59,22 @@ def main():
             assert_close([{key: value for key, value in record.items() if key not in ignored} for record in records],
                          [{key: value for key, value in record.items() if key not in ignored} for record in restored_records])
             restored.phase("resume_check", "upper", 2)
+            tolerance = dict(rtol=1e-5, atol=1e-6) if config["device"] == "cuda" else dict(rtol=0, atol=0)
+            parameter_error, optimizer_error = 0., 0.
             for layer in ("upper", "lower"):
                 for name, value in continued[layer].items():
-                    torch.testing.assert_close(value, restored.controller.state_dict()[layer][name], rtol=0, atol=0)
+                    recovered = restored.controller.state_dict()[layer][name]
+                    torch.testing.assert_close(value, recovered, msg=f"Restored {layer}.{name}", **tolerance)
+                    parameter_error = max(parameter_error, float((value.to(torch.float64) - recovered.to(torch.float64)).abs().max()))
             for layer in ("upper", "lower"):
                 original_state = trainer.optimizers[layer].state_dict()
                 restored_state = restored.optimizers[layer].state_dict()
                 assert original_state["param_groups"] == restored_state["param_groups"]
                 for parameter, fields in original_state["state"].items():
                     for name, value in fields.items():
-                        torch.testing.assert_close(value, restored_state["state"][parameter][name], rtol=0, atol=0)
+                        recovered = restored_state["state"][parameter][name]
+                        torch.testing.assert_close(value, recovered, msg=f"Restored {layer} optimizer {parameter}.{name}", **tolerance)
+                        optimizer_error = max(optimizer_error, float((value.to(torch.float64) - recovered.to(torch.float64)).abs().max()))
             diagnostics = inspect_run(store.path)
             store.finish()
             for name, expected in store.manifest["artifacts"].items():
@@ -78,7 +91,8 @@ def main():
                 calibration_slots=config["training"]["calibration_episodes"] * config["horizon"],
                 training_slots=trained_slots, resume_slots=trainer.total_slots - trained_slots,
                 repeated_resume_slots=restored.total_slots - trained_slots,
-                deterministic_reload_equal=True, resumed_parameters_and_optimizers_equal=True,
+                deterministic_reload_equal=True, resumed_parameters_and_optimizers_close=True,
+                resume_tolerance=tolerance, maximum_parameter_error=parameter_error, maximum_optimizer_error=optimizer_error,
                 replay_and_independent_totals_equal=True, manifest_hashes_passed=True,
                 update_samples=sum(item["samples"] for item in diagnostics["updates"]),
                 minibatches=sum(item["minibatches"] for item in diagnostics["updates"]),
@@ -97,6 +111,10 @@ def main():
                 write_json(args.summary, dict(status="failed", error=repr(error), source=store.manifest["source"],
                                              measured_wall_seconds=time.perf_counter() - started))
             raise
+        finally:
+            trainer.close()
+            if restored is not None:
+                restored.close()
     if args.summary:
         write_json(args.summary, report)
     print(json.dumps({key: value for key, value in report.items() if key not in ("source", "config", "stages")}, indent=2))

@@ -84,7 +84,7 @@ JointPolicy包装原有两套SetPolicy作为phase条件分支，不增加可见�
 
 ## 定位问题与外部参考
 
-collection.py通过spawn常驻runtime.collection_workers个进程采集独立episode，复用_collect_serial物理循环；conditional基础配置为8，cuda_update覆盖为4。每个任务加载同一组网络/归一化/版本快照，固定请求和动作种子；worker不更新参数或统计、不写正式日志。主进程按episode顺序合并，终止/截断边界保持，完成采样后才更新PPO和运行统计；下一阶段发送新快照。池不进入检查点，run的finally关闭，直接collect调用者需close。工作稿交替冻结规定解释当前实现来源，不证明该训练设计比同轨迹联合更新更优。
+collection.py通过spawn常驻runtime.collection_workers个进程采集独立episode，复用_collect_serial物理循环；conditional基础配置为8，cuda_update覆盖为4，HPGI与joint_ppo共享。每个任务加载同一组网络/归一化/版本快照，固定请求和动作种子；worker不更新参数或统计、不写正式日志。主进程按episode顺序合并，终止/截断边界保持，完成采样后才更新PPO和运行统计；下一阶段发送新快照。池不进入检查点，run的finally关闭，直接collect调用者需close。交替设计将当前被更新组件视为策略、冻结组件视为环境的一部分；冻结组件改变后必须重新采样。此依据是on-policy条件，不是初稿的权威性，也不证明该设计优于联合更新。
 
 效率检查边界：候选生成只在单个请求调用内复用与服务器无关的切分剖面，不做跨配置持久缓存；执行只检查选中候选，按服务器一次分组，空组跳过P3；贪心复用已知当前成本，仍比较完整P3增量成本。文件哈希以1MiB分块读取，避免把整份轨迹装入内存。`tests/test_static_efficiency.py`以调用次数、动作一致性和哈希检查这些性质，不以墙钟阈值作为测试。
 
@@ -106,7 +106,7 @@ RolloutTensors按float32/int64/bool打包整批输入，各一块连续存储；
 
 `runtime.torch_threads`可配置CPU算子线程数，默认1；小网络串行采样与批量更新对线程数的收益不同，需按整条链路实测。`scripts/validation/benchmark_batching.py`测CPU串行/批量路径；benchmark_update_device.py的--full-rollout在同一真实buffer及权重/Adam快照下比较CPU64和CUDA64/128/256，含搬运/KL/回传，为等5epoch计时仅在探针中放宽KL阈值。--snapshot-only显式导入旧完成快照仅作独立性能诊断，不恢复运行或写结果。CPU64/CUDA64为设备对照；128/256同时减少梯度步数，不能将全部收益归于硬件或宣称更易收敛。
 
-conditional终端按Iteration及两个步骤显示服务器PPO、调度PPO；进度条单行更新，末尾汇总采样平均reward/slot、两层loss、采样/PPO耗时。TensorBoard的iteration/train与cycles.csv采用完整交替编号。详细行为/更新审计按diagnostics.phase_interval采样保存，轻量统计与CSV每轮保留。显式启用validation时才增加第三步和对应评价结果，打印同样使用单槽均值；episode累计回报单列，不与归一化训练reward混用。
+conditional终端按Iteration及两个步骤显示服务器PPO、调度PPO；进度条单行更新，末尾汇总采样平均reward/slot、两层loss、采样/PPO耗时。TensorBoard的iteration/train与cycles.csv采用完整交替编号。HPGI和joint_ppo均仅在diagnostics.phase_interval命中时执行输入归一化/激活饱和度的额外前向和详细行为/更新审计；HPGI按各组件更新次数独立计数，避免偶数间隔永远只覆盖交替中的一侧。优势、KL、梯度、概率复算与CSV仍每轮保留。显式启用validation时才增加第三步和对应评价结果，打印同样使用单槽均值；episode累计回报单列，不与归一化训练reward混用。
 
 - [CleanRL PPO](https://github.com/vwxyzjn/cleanrl/blob/fe8d8a03c41a7ef5b523e2e354bd01c363e786bb/cleanrl/ppo.py)：fe8d8a03c41a7ef5b523e2e354bd01c363e786bb，MIT；正交初始化、Adam、GAE、clip/KL/梯度经验参考，没有复制源码文件。
 - [SB3](https://github.com/DLR-RM/stable-baselines3/tree/0cdcd200deef06b9ad0af72f6ddfb07c06c6df39)：MIT；终止/截断、种子与评价核对。[MaskablePPO](https://github.com/Stable-Baselines-Team/stable-baselines3-contrib/tree/a8af63682070df0bda9707400b2e971055600910)：MIT；掩码语义核对，不调用其learn。

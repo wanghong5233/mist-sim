@@ -4,14 +4,14 @@
 
 |目录|入口|用途|
 |---|---|---|
-|training/|compare_mechanisms.py --slots 32768|共同预训练后，等物理槽预算比较HPGI与joint_ppo；默认无独立评价，--evaluation-trajectories N仅结束时评价一次|
+|training/|compare_mechanisms.py --slots 32768|共同预训练后，等物理槽预算比较HPGI与joint_ppo；--overlay将同一加速/学习配置应用到双方。默认无独立评价，--evaluation-trajectories N仅结束时评价一次|
 |validation/|benchmark_collection.py --checkpoint 路径|同冻结策略和8条输入轨迹比较2/4/6/8worker；区分冷启动、重复暖池中位数、worker墙钟/CPU/P3及回传等待，核对动作/概率/物理结果哈希；仅打印，旧快照只作诊断|
 |validation/|diagnose_learning.py --checkpoint 路径|默认检查策略/熵梯度和固定公开状态的8次局部PPO学习；--joint-updates N --lambdas .95 .8对比GAE lambda，--normalization global或phase控制优势标准化。仅在内存采样/更新，前后用相同两条诊断轨迹比较，不续训旧记录、不写正式结果|
 |data/|profile_models.py|官方模型及输入准备、串行离线测量|
 |data/|export_profiles.py --verify-saved|导出/复算已保存剖面|
 |data/|check_inputs.py|输入、物理和重放检查；默认临时运行|
 |validation/|check_rollouts.py|当前配置快/慢rollout及GAE/概率/物理复算；默认仅打印，--summary可显式导出排障摘要|
-|validation/|check_profile_chain.py|真实剖面的48槽正确性短更新、重载和续训一致性，退出清理原始产物|
+|validation/|check_profile_chain.py|真实剖面的48槽HPGI短更新、独立物理/loss复算、重载和续训一致性；支持--overlay/--set检查GPU及采样配置，兼容minimal/full检查点，退出关闭进程池并清理产物|
 |validation/|inspect_logs.py|复算已有轨迹、PPO及物理中间量|
 |validation/|benchmark_batching.py|串行参照与批量张量前向/反向等价及交错计时；默认合成输入，--behavior可读已有轨迹，仅打印|
 |validation/|benchmark_update_device.py --checkpoint 路径|默认32/64事件CPU/CUDA小批前向/反向/Adam及loss/梯度一致性；--full-rollout比较整批更新CPU64/CUDA64/128/256（5epoch，探针放宽KL限制），包括搬运/KL/回传及峰值显存；--snapshot-only仅为诊断导入旧完成快照，不作续训。仅更新内存副本，不写正式结果|

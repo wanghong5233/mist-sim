@@ -360,7 +360,7 @@ class Trainer:
         units = self.reward_normalizer.units()
         started = time.perf_counter()
         detail_interval = self.config.get("diagnostics", {}).get("phase_interval", 1)
-        detailed = len(self.completed_stages) % detail_interval == 0
+        detailed = self.versions[layer] % detail_interval == 0
         self.event("phase_started", stage=name, layer=layer, target_samples=count)
         for parameter in frozen.parameters():
             parameter.requires_grad_(False)
@@ -369,7 +369,7 @@ class Trainer:
             collected = time.perf_counter()
             from .diagnostics import policy_input_diagnostics, rollout_diagnostics
             diagnostics_started = time.perf_counter()
-            input_diagnostics = policy_input_diagnostics(policy, buffer.samples)
+            input_diagnostics = policy_input_diagnostics(policy, buffer.samples) if detailed else {}
             rollout = rollout_diagnostics(buffer, layer_settings(self.config, layer))
             diagnostics_seconds = time.perf_counter() - diagnostics_started
             trace_started = time.perf_counter()

@@ -25,7 +25,7 @@ def test_training_curve_without_any_extra_evaluation(config, tmp_path, monkeypat
         assert trainer.validation_history == []
         assert not (store.path / "traces/validation").exists()
         assert not (store.result_path / "validation.csv").exists()
-        assert len(list((store.path / "traces/phases").iterdir())) == 1
+        assert {path.name for path in (store.path / "traces/phases").iterdir()} == {"pretrain", "cycle_000_upper"}
         with (store.result_path / "cycles.csv").open() as stream:
             rows = list(csv.DictReader(stream))
         assert len(rows) == 2

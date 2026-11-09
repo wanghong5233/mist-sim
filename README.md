@@ -1,6 +1,6 @@
 # MIST 仿真实验工程
 
-`mist-sim/`是独立仿真工程与Git仓库根，`src/mist_sim/`是Python导入包。仓库实现环境、原稿HPGI、可切换的joint_ppo候选、全部基线及训练/评价流程；主算法选择依据实验对照。
+`mist-sim/`是独立仿真工程与Git仓库根，`src/mist_sim/`是Python导入包。仓库实现环境、交替HPGI和joint_ppo两个候选、全部基线及训练/评价流程。初稿提供设计假设，不作为算法正确性标准；实现依据强化学习语义核验，主算法选择依据实际数据与实验对照。
 
 ## 仓库与隐私
 
@@ -82,9 +82,11 @@ mist-sim/
 & D:/Anaconda/envs/pytorch/python.exe scripts/validation/check_training_scenario.py --witness --exact --seed 4100017
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method hpgi --dry-run
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method hpgi --seed 4200001
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --overlay configs/algorithms/cuda_update.json --method hpgi --seed 4200001
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method joint_ppo --seed 4200001
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --overlay configs/algorithms/cuda_update.json --method joint_ppo --seed 4200001
 & D:/Anaconda/envs/pytorch/python.exe scripts/training/compare_mechanisms.py --config configs/conditional.json --slots 32768 --seed 4200001
+& D:/Anaconda/envs/pytorch/python.exe scripts/training/compare_mechanisms.py --config configs/conditional.json --overlay configs/algorithms/cuda_update.json --slots 32768 --seed 4200001
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim evaluate --checkpoint logs/runs/<训练ID>/checkpoints/last.pt --seed 4400019
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim replay --checkpoint logs/runs/<训练ID>/checkpoints/last.pt --records logs/runs/<评价ID>/traces/evaluation.json
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim summarize --records logs/runs/<评价ID>/traces/evaluation.json
@@ -102,6 +104,8 @@ mist-sim/
 ```powershell
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --overlay configs/algorithms/cuda_update.json --overlay configs/algorithms/joint_phase_normalized.json --seed 4200001 --dry-run
 ```
+
+HPGI与joint_ppo共用采样缓存、剖面/P3优化、CPU进程池和CUDA更新；cuda_update预设适用于两者。HPGI的两个buffer本来就分别标准化优势，global与phase对单层buffer等价，无需额外移植分组逻辑。CUDA128下HPGI每阶段仍采样256个开关或1024个调度transition，每epoch分别2/8小批、最多10/40次Adam更新；上层样本较少，128并非已验证的最佳学习batch，可通过ppo_layers.upper.minibatch独立调整。两方法比较入口支持相同--overlay，避免只给其中一方应用加速配置。
 
 等物理槽不等于等优化计算量：默认每2048槽，HPGI最多100个Adam步骤，joint_ppo为200个。comparison.csv并列实际训练transition、样本使用次数、优化步数与分项耗时；两者统一冷启动采样池。不能由“只采样一次”推断联合方法整体更快，详细口径见IMPLEMENTATION。
 
@@ -167,6 +171,6 @@ training.cycles上限3000。conditional的convergence直接使用训练采样原
 
 conditional使用checkpoint_policy.mode=minimal：只覆盖last.pt，在启动、预训练完成、每250个完整iteration和正常结束保存，不逐组件/逐轮保存，不保存best或selected副本；最佳评价仅记录数值，不能据此声称存在相应权重。检查点保留网络、优化器、统计及随机状态供中断恢复与后续评价；完整曲线CSV每轮照常保存。其他配置默认full模式保持initial/last/final/best/selected语义，阶段快照须显式开启并设保留上限。
 
-conditional每10次组件更新保存一次完整behavior/update/physical诊断，保留最近2组及最近2条输入；不再每阶段写巨大JSON再清理。input_seeds.jsonl保留全部种子，所有训练CSV/梯度/KL摘要每轮照常记录。未记录或已清理阶段不支持逐动作直接重放。独立评价关闭时不创建validation结果或选择最佳权重。
+conditional每10次组件更新保存一次完整behavior/update/physical诊断；HPGI分别按开关/调度更新次数计数，避免固定间隔漏掉一侧。保留最近2组及最近2条输入；不再每阶段写巨大JSON再清理。input_seeds.jsonl保留全部种子，所有训练CSV/梯度/KL摘要每轮照常记录。未记录或已清理阶段不支持逐动作直接重放。独立评价关闭时不创建validation结果或选择最佳权重。
 
 完整验证套件默认系统临时空间，退出删除轨迹、报告与权重；仅显式`--keep-artifacts tmp/debug-example`保留排障现场，用完删除，不归档。检查结论必要时简短写入SETUP，详细证据可由tests和脚本重建。测试数值不进入论文性能表。

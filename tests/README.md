@@ -1,5 +1,7 @@
 # 测试范围
 
+test_hpgi_efficiency.py检查交替组件的重型输入诊断门控、global/phase标准化及参数更新等价、公共加速overlay、4worker/CUDA的预训练/交替/恢复、冻结层不变、行为版本刷新与旧buffer拒用；保存记录由独立GAE/loss和物理检查复算。
+
 test_sampling_efficiency.py检查采样缓存命中不重建候选、环境复用已验证剖面、输入轨迹只生成一次、缓存返回值隔离，以及宽数值尺度P3容量/KKT；还检查分组件优势标准化、单元素/常量组、配置与dry-run及独立loss复算。rollout诊断记录更新前分组件优势、时隙相关性和价值拟合；不以更新后的explained variance代替动作收益证据。CPU/CUDA等价更新同时覆盖global和phase标准化。
 
 test_update_devices.py覆盖设备校验、CPU worker边界、整批缓存共享存储、CPU/CUDA完整更新数值一致、GPU Adam及回传、异常恢复CPU、跨设备检查点及预训练/联合更新/续训。无CUDA时仅GPU测试显式skip；不把CPU测试通过当CUDA已验收。

@@ -144,10 +144,11 @@ def main():
     parser.add_argument("--config", default="configs/conditional.json")
     parser.add_argument("--slots", type=int, required=True, help="Post-pretraining physical slots per method")
     parser.add_argument("--seed", type=int)
+    parser.add_argument("--overlay", action="append", default=[])
     parser.add_argument("--set", dest="overrides", action="append", default=[])
     parser.add_argument("--evaluation-trajectories", type=int, default=0, help="One final paired development check, never per iteration")
     arguments = parser.parse_args()
-    config = load_config(arguments.config, overrides=arguments.overrides)
+    config = load_config(arguments.config, overlays=arguments.overlay, overrides=arguments.overrides)
     seed = arguments.seed if arguments.seed is not None else config["seeds"]["train"]
     root = default_project_root()
     if config["fixture_kind"] == "synthetic_hand_calculation":
