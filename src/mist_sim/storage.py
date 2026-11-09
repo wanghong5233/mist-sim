@@ -108,7 +108,7 @@ class RunStore:
         self.monitoring = config.get("monitoring", {"tensorboard": False, "console": True})
         self.manifest = {"run_id": identifier, "command": command, "seed": seed,
                          "started_utc": datetime.now(timezone.utc).isoformat(), "status": "running",
-                         "source": source_identity(self.root), "device": config["device"], "sampling_device": "cpu",
+                        "source": source_identity(self.root), "device": config.get("device", "cpu"), "sampling_device": "cpu",
                          "dependencies": {"python": platform.python_version(), "numpy": np.__version__,
                                           "scipy": scipy.__version__, "torch": torch.__version__},
                          "budget": None, "trace_retention": self.trace_retention}
