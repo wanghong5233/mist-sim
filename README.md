@@ -13,6 +13,7 @@
 |文件|职责|
 |---|---|
 |[IMPLEMENTATION.md](IMPLEMENTATION.md)|唯一当前实现规格：模型、state/action张量、奖励、PPO、轨迹长度与更新节奏|
+|[强化学习排障与经验复用](docs/RL_TROUBLESHOOTING.md)|已经定位的问题、证据入口及向HPGI/学习基线迁移的检查顺序|
 |[data/README.md](data/README.md)|本地剖面、原始输入和恢复边界|
 |[scripts/README.md](scripts/README.md)|可执行脚本索引|
 |[AGENTS.md](AGENTS.md)|执行与文档维护约束|
@@ -27,6 +28,7 @@ mist-sim/
 ├── src/mist_sim/  唯一可安装源码；环境、PPO、基线、数据与指标
 ├── tests/         手算、反例、训练及恢复回归测试
 ├── scripts/       data/数据处理，validation/核验，maintenance/维护
+├── docs/          强化学习排障与经验复用指南
 ├── data/          raw/原始输入，profiling/剖析及来源，processed/仿真数值输入
 ├── logs/runs/     正式训练/评价的运行记录，执行时创建
 ├── results/       每次运行的原始结果CSV，以及据此生成的统计表和论文图
