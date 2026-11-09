@@ -5,6 +5,7 @@
 |目录|入口|用途|
 |---|---|---|
 |training/|compare_mechanisms.py --slots 32768|共同预训练后，等物理槽预算比较HPGI与joint_ppo；--overlay将同一加速/学习配置应用到双方。默认无独立评价，--evaluation-trajectories N仅结束时评价一次|
+|training/|overnight_queue.py --queue-id 名称 --wait-run 运行ID --candidate 运行ID --candidate 运行ID --seed 种子2 --seed 种子3|Windows一次性依赖队列；等指定运行成功200轮并退出后，按两候选尾20轮原始成本暂选，两个可见终端各跑一个新种子/200轮。冻结原配置和源码；失败/失配不抢跑、不重试；logs/queues保存状态/选法/退出码，结果仍归results各运行。等待及训练监控期间请求系统保持唤醒，不要求屏幕亮；完成后释放。24小时仅为监控上限，不强杀训练。两任务成功后调用已有绘图入口生成三种子均值与标准差阴影；旧199轮不补点|
 |plotting/|plot_convergence.py --curve "Joint PPO=results/<运行名>"|只读cycles.csv生成中英文学习曲线，支持多算法/独立种子、iteration/物理槽、滑动均值和标准差/置信带；图与复现快照归对应results的figures/convergence，详见docs/PLOTTING.md|
 |validation/|benchmark_collection.py --checkpoint 路径|同冻结策略和8条输入轨迹比较2/4/6/8worker；区分冷启动、重复暖池中位数、worker墙钟/CPU/P3及回传等待，核对动作/概率/物理结果哈希；仅打印，旧快照只作诊断|
 |validation/|diagnose_learning.py --checkpoint 路径|默认检查策略/熵梯度和固定公开状态的8次局部PPO学习；--joint-updates N --lambdas .95 .8对比GAE lambda，--normalization global或phase控制优势标准化。仅在内存采样/更新，前后用相同两条诊断轨迹比较，不续训旧记录、不写正式结果|
