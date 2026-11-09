@@ -210,6 +210,7 @@ class Trainer:
             if previous_scale is not None:
                 getattr(self.controller, component).value_scale.mul_(units["scale"] / previous_scale)
             self.value_reward_scales[component] = units["scale"]
+            getattr(self.controller, component).set_value_baseline(self.reward_normalizer.slot_mean * units["scale"])
         if self.config.get("runtime", {}).get("collection_workers", 0):
             return self._collect_parallel(layer, count, pretrain)
         return self._collect_serial(layer, count, pretrain)
@@ -459,6 +460,7 @@ class Trainer:
                    joint_kl=metrics["post_update_joint_kl"], frozen_unchanged=metrics["frozen_unchanged"],
                    raw_reward_per_slot=sum(record["reward"] for record in records) / len(records),
                    training_reward_mean=metrics["training_reward_mean"], explained_variance=metrics["explained_variance"],
+                   critic_prediction=metrics["critic_prediction"],
                    reward_scale=units["scale"], reward_clipped_slots=metrics["reward_clipped_slots"],
                    collection_seconds=metrics["collection_seconds"], update_seconds=metrics["update_seconds"])
         return metrics

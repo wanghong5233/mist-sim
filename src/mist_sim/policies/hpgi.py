@@ -13,8 +13,12 @@ class Controller:
         self.method = config["method"]
         self.learn_upper = self.method not in ("always_on", "greedy_consolidation")
         self.learn_lower = self.method not in ("upper_ppo_greedy", "greedy_consolidation")
-        self.upper = SetPolicy(layer_settings(config, "upper")["hidden"])
-        self.lower = SetPolicy(layer_settings(config, "lower")["hidden"], config["learned_rates"])
+        def policy(layer, rates=False):
+            settings = layer_settings(config, layer)
+            return SetPolicy(settings["hidden"], rates, settings.get("value_model", "plain"),
+                             config["horizon"], settings["gamma"])
+        self.upper = policy("upper")
+        self.lower = policy("lower", config["learned_rates"])
 
     def slow(self, observation, deterministic=False, pretrain=False, record=True, cached=None):
         if pretrain or self.method == "always_on":

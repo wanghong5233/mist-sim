@@ -85,6 +85,7 @@ mist-sim/
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --overlay configs/algorithms/cuda_update.json --method hpgi --seed 4200001
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method joint_ppo --seed 4200001
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --overlay configs/algorithms/cuda_update.json --method joint_ppo --seed 4200001
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --overlay configs/algorithms/cuda_update.json --overlay configs/algorithms/joint_finite_horizon.json --seed 4200001
 & D:/Anaconda/envs/pytorch/python.exe scripts/training/compare_mechanisms.py --config configs/conditional.json --slots 32768 --seed 4200001
 & D:/Anaconda/envs/pytorch/python.exe scripts/training/compare_mechanisms.py --config configs/conditional.json --overlay configs/algorithms/cuda_update.json --slots 32768 --seed 4200001
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim evaluate --checkpoint logs/runs/<训练ID>/checkpoints/last.pt --seed 4400019
@@ -124,6 +125,8 @@ HPGI与joint_ppo共用采样缓存、剖面/P3优化、CPU进程池和CUDA更新
 场景检查命令不更新网络：先计算单请求可行上界，--witness构造并重放完整调度，--exact穷举预先定义的两服务器小网格及所有合法固定切分。默认仅打印，搜索不完整会返回失败且不报告最优差距。它检查“存在可服务和改善成本的选择”，不保证HPGI优于全部基线。当前场景期限[0.8,1.0]秒、每请求10MHz/每AP40MHz；推导与条件假设见data/SCENARIO.md。状态结构已变更，旧210维评分网络的检查点不能续训为当前270维网络。
 
 ## 日志与资产
+
+`joint_finite_horizon.json`选择联合PPO、按组件标准化优势、有限时域critic和采样回报目标。critic由过去物理奖励均值乘剩余折扣槽数建立基线，再学习随剩余时域缩小的状态残差；最后一槽仍估计该槽奖励，只有剩余零槽时价值为零。critic目标用实际采样奖励累加，真实终止归零，采样截断使用末端bootstrap；actor继续使用跨组件GAE。它针对尾部价值偏差，不改变环境奖励、状态字段或actor容量。默认plain/gae及joint_phase_normalized对照仍可选；HPGI可通过`--set ppo.value_model=finite_horizon --set ppo.value_target=sampled_return`使用相同估计器。不同估计器须新建运行，不能直接续训旧源码快照。
 
 每个正式运行位于logs/runs/<用途-方法-种子>/，同一次运行的材料放在一起，防止日志和权重错配；自动后缀仅防覆盖。目录固定为：
 

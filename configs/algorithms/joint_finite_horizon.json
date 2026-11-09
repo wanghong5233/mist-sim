@@ -1,0 +1,8 @@
+{
+  "method": "joint_ppo",
+  "ppo": {
+    "advantage_normalization": "phase",
+    "value_model": "finite_horizon",
+    "value_target": "sampled_return"
+  }
+}

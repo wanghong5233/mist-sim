@@ -101,6 +101,8 @@ class ConsoleProgress:
             self.write(f"训练启动：准备阶段（校准、预训练 {self.pretrain_total} 次） → Iteration 1～{self.iteration_total}")
             self.write(f"采样设备=cpu | PPO更新设备={schedule.get('update_device', 'cpu')}"
                        f" | 采样进程={schedule.get('collection_workers', 0)}")
+            self.write(f"价值模型={schedule.get('value_model', 'plain')}"
+                       f" | critic目标={schedule.get('value_target', 'gae')}")
         elif event == "cycle_completed":
             losses = "".join(f" | {name}loss={fields[layer + '_loss']:.5g}"
                              for layer, name in (("upper", "服务器"), ("lower", "调度"))
@@ -207,6 +209,8 @@ class TrainingMonitor:
             names = ("raw_reward_per_slot", "training_reward_mean", "service", "energy", "cost", "joint_kl",
                      "explained_variance", "reward_scale", "reward_clipped_slots", "collection_seconds", "update_seconds")
             self.scalars("train/" + fields["layer"], {name: fields[name] for name in names}, fields["total_slots"])
+            if fields.get("critic_prediction"):
+                self.scalars("critic/" + fields["layer"], fields["critic_prediction"], fields["total_slots"])
             if fields.get("activation_probability"):
                 self.scalars("train/upper/activation_probability", fields["activation_probability"], fields["total_slots"])
         elif event == "validation_completed":

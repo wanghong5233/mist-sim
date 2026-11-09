@@ -10,9 +10,12 @@ class RunningRewardNormalizer:
         self.clip = config.get("reward_normalization", {}).get("max_abs_slot_reward", 10.)
         self.count, self.mean, self.m2 = 0, 0., 0.
         self.discounted_return = 0.
+        self.slot_count, self.slot_mean = 0, 0.
 
     def observe(self, records):
         for record in records:
+            self.slot_count += 1
+            self.slot_mean += (record["reward"] - self.slot_mean) / self.slot_count
             if record["slot"] == 0:
                 self.discounted_return = 0.
             self.discounted_return = self.gamma * self.discounted_return + record["reward"]
@@ -30,11 +33,13 @@ class RunningRewardNormalizer:
                     clip=self.clip if self.enabled else None, count=self.count, mean=self.mean, variance=variance)
 
     def state_dict(self):
-        return dict(count=self.count, mean=self.mean, m2=self.m2, discounted_return=self.discounted_return)
+        return dict(count=self.count, mean=self.mean, m2=self.m2, discounted_return=self.discounted_return,
+                    slot_count=self.slot_count, slot_mean=self.slot_mean)
 
     def load_state_dict(self, state):
         for key in ("count", "mean", "m2", "discounted_return"):
             setattr(self, key, state[key])
+        self.slot_count, self.slot_mean = state.get("slot_count", 0), state.get("slot_mean", 0.)
 
 
 def training_reward(record, units):

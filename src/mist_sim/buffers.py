@@ -54,6 +54,20 @@ class RolloutBuffer:
             raise RuntimeError("Mixed behavior/opponent versions")
         self.consumed = True
 
+    def sampled_returns(self, gamma):
+        """Actual reward-to-go, bootstrapping only at a collection boundary."""
+        result = np.zeros(len(self.samples), dtype=np.float64)
+        for index in reversed(range(len(self.samples))):
+            sample = self.samples[index]
+            if sample["terminated"]:
+                future = 0.
+            elif sample["truncated"] or index == len(self.samples) - 1:
+                future = sample["next_value"]
+            else:
+                future = result[index + 1]
+            result[index] = sample["reward"] + gamma ** sample["duration"] * future
+        return result
+
     def clear(self):
         self.samples.clear()
 

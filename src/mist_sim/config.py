@@ -58,6 +58,8 @@ def load_config(path, overlays=(), overrides=()):
         config.update(profiles=component["profiles"], units=component["units"])
     config.setdefault("ppo_layers", {"upper": {}, "lower": {}})
     config["ppo"].setdefault("advantage_normalization", "global")
+    config["ppo"].setdefault("value_model", "plain")
+    config["ppo"].setdefault("value_target", "gae")
     config.setdefault("validation", {"min_service_rate": None, "selection": "best_feasible_cost"})
     config["validation"].setdefault("trajectories", 1)
     config["validation"].setdefault("sampled", False)
@@ -250,8 +252,12 @@ def validate(config):
         settings = layer_settings(config, layer)
         expected = {"hidden", "learning_rate", "adam_epsilon", "clip", "gae_lambda", "gamma",
                     "max_grad_norm", "value_coefficient", "entropy_coefficient", "epochs", "minibatch", "target_kl"}
-        if not expected <= set(settings) or set(settings) - expected - {"advantage_normalization"}:
+        if not expected <= set(settings) or set(settings) - expected - {"advantage_normalization", "value_model", "value_target"}:
             raise ValueError("Unknown/missing PPO setting")
+        if settings.get("value_model", "plain") not in ("plain", "finite_horizon"):
+            raise ValueError("Invalid value model")
+        if settings.get("value_target", "gae") not in ("gae", "sampled_return"):
+            raise ValueError("Invalid value target")
         if settings.get("advantage_normalization", "global") not in ("global", "phase"):
             raise ValueError("Invalid advantage normalization")
         for key in ("hidden", "epochs", "minibatch"):

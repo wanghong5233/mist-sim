@@ -130,10 +130,13 @@ def lower_prefix_frame(frame, problem, usage, index, allocated, owners):
 
 
 class SetPolicy(nn.Module):
-    def __init__(self, hidden=64, learned_rates=False):
+    def __init__(self, hidden=64, learned_rates=False, value_model="plain", horizon=1, gamma=1.):
         super().__init__()
         self.learned_rates = learned_rates
+        self.value_model, self.value_horizon, self.value_gamma = value_model, horizon, gamma
+        self.discounted_horizon = horizon if gamma == 1 else (1 - gamma ** horizon) / (1 - gamma)
         self.register_buffer("value_scale", torch.tensor(1.))
+        self.register_buffer("value_baseline", torch.tensor(0.))
         self.item_norm, self.server_norm, self.context_norm = Normalizer(ITEM_DIM), Normalizer(SERVER_DIM), Normalizer(CONTEXT_DIM)
         self.action_norm = Normalizer(ITEM_DIM)
         self.prefix_norm = Normalizer(PREFIX_DIM)
@@ -146,6 +149,11 @@ class SetPolicy(nn.Module):
         combined = hidden * 4 + CONTEXT_DIM + PREFIX_DIM
         self.score = mlp(combined, 1, hidden, 0.01)
         self.value_head = mlp(hidden * 2 + CONTEXT_DIM, 1, hidden)
+        if value_model == "finite_horizon":
+            # Start from the measured past reward rate. The network learns the
+            # state-dependent residual, instead of rediscovering the clock.
+            nn.init.zeros_(self.value_head[-1].weight)
+            nn.init.zeros_(self.value_head[-1].bias)
         if learned_rates:
             self.rate_head = mlp(combined, 1, hidden, 0.01)
             self.rate_log_std = nn.Parameter(torch.zeros(()))
@@ -176,8 +184,24 @@ class SetPolicy(nn.Module):
         parts = tuple(encoded[0].split([hidden, hidden, CONTEXT_DIM]))
         return (parts, servers) if with_servers else parts
 
+    def value_from_encoding(self, encoding, context):
+        residual = self.value_head(encoding).squeeze(-1)
+        if self.value_model == "plain":
+            return residual * self.value_scale
+        remaining = (context[..., 0] * self.value_horizon).round().clamp(0, self.value_horizon)
+        steps = (remaining if self.value_gamma == 1 else
+                 (1 - self.value_gamma ** remaining) / (1 - self.value_gamma))
+        return self.value_scale * (self.value_baseline * steps +
+                                   residual * (steps / self.discounted_horizon))
+
+    @torch.no_grad()
+    def set_value_baseline(self, reward_per_slot):
+        if self.value_model == "finite_horizon":
+            self.value_baseline.copy_(self.value_scale.new_tensor(reward_per_slot) / self.value_scale)
+
     def value(self, frame):
-        return self.value_head(torch.cat(self.encode(frame, critic=True))).squeeze() * self.value_scale
+        encoded = torch.cat(self.encode(frame, critic=True))
+        return self.value_from_encoding(encoded, encoded.new_tensor(frame["context"]))
 
     def distribution(self, frame_encoding, features, prefix, mask, servers=None, targets=None):
         encoded_items = self.actor_actions(self.action_norm(torch.tensor(features, dtype=torch.float32)))

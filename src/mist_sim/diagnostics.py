@@ -18,6 +18,8 @@ def rollout_diagnostics(buffer, settings):
         raise ValueError("Cannot describe an empty rollout")
     gamma = settings["gamma"]
     advantages, targets = buffer.advantages(gamma, settings["gae_lambda"])
+    critic_targets = (buffer.sampled_returns(gamma) if settings.get("value_target", "gae") == "sampled_return"
+                      else targets)
     normalized = normalize_advantages(advantages, samples, settings.get("advantage_normalization", "global"))
     segment_returns = np.zeros(len(samples), dtype=np.float64)
     for index in reversed(range(len(samples))):
@@ -59,13 +61,14 @@ def rollout_diagnostics(buffer, settings):
                      (not sample["terminated"]) - sample["value"],
             advantage=float(advantages[index]), normalized_advantage=float(normalized[index]),
             gae_value_target=float(targets[index]), segment_return_with_bootstrap=float(segment_returns[index])))
+        examples[-1]["critic_target"] = float(critic_targets[index])
     learning_signal = {}
     for phase in sorted({sample.get("phase", buffer.layer) for sample in samples}):
         selected = np.asarray([sample.get("phase", buffer.layer) == phase for sample in samples])
         slots = np.asarray([sample.get("slot", 0) for sample in samples])[selected]
         signal = advantages[selected]
         values = np.asarray([sample["value"] for sample in samples])[selected]
-        phase_targets = targets[selected]
+        phase_targets = critic_targets[selected]
         learning_signal[phase] = dict(advantage_mean=float(signal.mean()), advantage_std=float(signal.std()),
             normalized_mean=float(normalized[selected].mean()), normalized_std=float(normalized[selected].std()),
             positive_fraction=float((signal > 0).mean()),
@@ -181,6 +184,22 @@ def check_update(samples, audit):
     close(audit["td_errors"], deltas, "TD")
     close(audit["advantages"], targets, "forward-sum GAE")
     returns = np.asarray(targets) + [sample["value"] for sample in samples]
+    if settings.get("value_target", "gae") == "sampled_return":
+        # Independent forward sum, rather than the buffer's backward recursion.
+        returns = []
+        for start in range(len(samples)):
+            total, discount = 0., 1.
+            for index in range(start, len(samples)):
+                sample = samples[index]
+                total += discount * sample["reward"]
+                discount *= gamma ** sample["duration"]
+                if sample["terminated"]:
+                    break
+                if sample["truncated"] or index == len(samples) - 1:
+                    total += discount * sample["next_value"]
+                    break
+            returns.append(total)
+        returns = np.asarray(returns)
     close(audit["returns"], returns, "returns")
     normalized = np.asarray(targets)
     groups = {}

@@ -188,7 +188,10 @@ def values_batch(policy, samples, cache=None):
                 values = values.index_copy(0, tensor(policy, indices, torch.long),
                     values_batch(subpolicy, [samples[index] for index in indices], cache))
         return values
-    return policy.value_head(encode_frames(policy, [sample["frame"] for sample in samples], True, cache)).flatten() * policy.value_scale
+    frames = [sample["frame"] for sample in samples]
+    context = (torch.cat([cache.rows(frame["context"]) for frame in frames]) if cache is not None else
+               tensor(policy, [frame["context"] for frame in frames]))
+    return policy.value_from_encoding(encode_frames(policy, frames, True, cache), context)
 
 
 def replay_batch(policy, samples, with_value=True, cache=None):

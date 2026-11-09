@@ -52,6 +52,8 @@ def _update(policy, optimizer, buffer, config, behavior_version, opponent_versio
     if not buffer.samples:
         raise ValueError("Empty rollout")
     advantages, returns = buffer.advantages(config["gamma"], config["gae_lambda"])
+    if config.get("value_target", "gae") == "sampled_return":
+        returns = buffer.sampled_returns(config["gamma"])
     raw_advantages = advantages.copy()
     initial_parameters = {name: parameter.detach().clone() for name, parameter in policy.named_parameters()}
     advantages = normalize_advantages(advantages, buffer.samples, config.get("advantage_normalization", "global"))
@@ -161,6 +163,7 @@ def _update(policy, optimizer, buffer, config, behavior_version, opponent_versio
     output = {key: float(np.average([item[key] for item in diagnostics], weights=[item["batch_size"] for item in diagnostics]))
               for key in diagnostics[0] if key not in ("epoch", "batch_size")}
     output.update(samples=sample_count, optimizer_steps=len(diagnostics), explained_variance=explained,
+                  value_target=config.get("value_target", "gae"),
                   input_pack_transfer_seconds=packing_seconds,
                   rollout_tensor_bytes=input_cache.storage_bytes,
                   rollout_tensor_transfers=input_cache.host_to_device_copies + int(device.type == "cuda"),
@@ -191,6 +194,12 @@ def _update(policy, optimizer, buffer, config, behavior_version, opponent_versio
                 for group in ("actor", "critic")}
             output["components"][phase] = component
     output["return_range"] = [float(returns.min()), float(returns.max())]
+    terminal = np.asarray([sample["terminated"] for sample in buffer.samples], dtype=bool)
+    output["critic_prediction"] = dict(target_rmse=float(np.sqrt(np.mean((returns - final_values) ** 2))),
+        terminal_count=int(terminal.sum()),
+        terminal_value_mean=float(final_values[terminal].mean()) if terminal.any() else None,
+        terminal_target_mean=float(returns[terminal].mean()) if terminal.any() else None,
+        terminal_mae=float(np.mean(np.abs(returns[terminal] - final_values[terminal]))) if terminal.any() else None)
     output["advantage_range"] = [float(raw_advantages.min()), float(raw_advantages.max())]
     output["normalized_advantage"] = {"mean": float(advantages.mean()), "std": float(advantages.std()),
                                       "min": float(advantages.min()), "max": float(advantages.max())}
