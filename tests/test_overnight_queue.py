@@ -82,7 +82,7 @@ def test_visible_terminal_command_preserves_unicode_quotes_and_stdout(tmp_path):
     command = queue.terminal_command(tmp_path / "中文'路径", "python.exe", tmp_path / "config.json",
                                      "example", 4200002, tmp_path / "exit.json", "Training")
     text = base64.b64decode(command[-1]).decode("utf-16le")
-    assert command[:3] == ["powershell.exe", "-NoExit", "-EncodedCommand"]
+    assert command[:4] == ["powershell.exe", "-NoProfile", "-NoExit", "-EncodedCommand"]
     assert "中文''路径" in text and "--seed '4200002'" in text
     assert "$LASTEXITCODE" in text and "WriteAllText" in text
     assert "Tee-Object" not in text and "RedirectStandardOutput" not in text
@@ -114,7 +114,8 @@ def test_frozen_source_guard_and_duplicate_queue(tmp_path, monkeypatch):
         queue.execute(args(tmp_path))
 
 
-def test_wait_then_launch_exactly_two_independent_jobs_and_plot(tmp_path, monkeypatch):
+@pytest.mark.parametrize("launch_failure,plot_failure", [(False, False), (True, False), (False, True)])
+def test_wait_then_launch_exactly_two_independent_jobs_and_plot(tmp_path, monkeypatch, launch_failure, plot_failure):
     fake_run(tmp_path, "hpgi", cost=160, status="running")
     fake_run(tmp_path, "joint", cost=157, count=199)
     monkeypatch.setattr(queue, "source_hash", lambda root: "frozen")
@@ -133,22 +134,28 @@ def test_wait_then_launch_exactly_two_independent_jobs_and_plot(tmp_path, monkey
     def launch(command, **kwargs):
         text = base64.b64decode(command[-1]).decode("utf-16le")
         seed = 4200002 + len(launches)
+        launches.append(command)
+        if launch_failure and seed == 4200002:
+            raise OSError("First console launch failed")
         run = f"joint_ppo-finite-horizon-gpu-b128-w4-highqos-200-seed{seed}-overnight"
         assert run in text and str(seed) in text
         fake_run(tmp_path, run)
         queue.write_json(tmp_path / f"logs/queues/overnight/seed{seed}-exit.json", dict(exit_code=0))
-        launches.append(command)
         return SimpleNamespace(pid=1000+len(launches), poll=lambda: None)
 
     monkeypatch.setattr(queue.subprocess, "CREATE_NEW_CONSOLE", 16, raising=False)
     monkeypatch.setattr(queue.subprocess, "Popen", launch)
     plots = []
     monkeypatch.setattr(queue.subprocess, "run", lambda command, **kwargs:
-                        (plots.append(command) or SimpleNamespace(returncode=0)))
-    assert queue.execute(args(tmp_path)) == 0
+                        (plots.append(command) or SimpleNamespace(returncode=1 if plot_failure else 0)))
+    assert queue.execute(args(tmp_path)) == (1 if launch_failure or plot_failure else 0)
     status = queue.read_json(tmp_path / "logs/queues/overnight/status.json")
     assert len(sleeps) == 1 and len(launches) == 2
     assert status["selected"]["run"] == "joint"
-    assert status["status"] == "completed" and status["keep_awake"] is False
+    expected = "completed_with_failures" if launch_failure else "training_completed_plot_failed" if plot_failure else "completed"
+    assert status["status"] == expected and status["keep_awake"] is False
     assert [job["seed"] for job in status["jobs"]] == [4200002, 4200003]
-    assert len(plots) == 1 and plots[0].count("--curve") == 3
+    if launch_failure:
+        assert not plots and [job["status"] for job in status["jobs"]] == ["failed", "completed"]
+    else:
+        assert len(plots) == 1 and plots[0].count("--curve") == 3

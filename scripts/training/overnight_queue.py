@@ -115,7 +115,7 @@ def terminal_command(root, python, config, run_id, seed, receipt, title):
         "Write-Host ('Training exited with code ' + $trainingExit)",
     ])
     encoded = base64.b64encode(code.encode("utf-16le")).decode("ascii")
-    return ["powershell.exe", "-NoExit", "-EncodedCommand", encoded]
+    return ["powershell.exe", "-NoProfile", "-NoExit", "-EncodedCommand", encoded]
 
 
 def keep_awake(enable):
@@ -225,9 +225,14 @@ def execute(args):
             job = dict(seed=seed, run_id=run_id, status="launching", config=str(config_path), receipt=str(receipt))
             state["jobs"].append(job)
             save()
-            process = subprocess.Popen(terminal_command(root, args.python, config_path, run_id, seed, receipt,
-                f"MIST {config['method']} | seed {seed} | 200 iterations"), cwd=root,
-                creationflags=subprocess.CREATE_NEW_CONSOLE)
+            try:
+                process = subprocess.Popen(terminal_command(root, args.python, config_path, run_id, seed, receipt,
+                    f"MIST {config['method']} | seed {seed} | 200 iterations"), cwd=root,
+                    creationflags=subprocess.CREATE_NEW_CONSOLE)
+            except OSError as error:
+                job.update(status="failed", error=f"Terminal launch failed: {error}")
+                save()
+                continue
             children.append((job, process))
             job.update(status="running", terminal_pid=process.pid)
             save()
@@ -259,7 +264,7 @@ def execute(args):
             save()
             if any(job["status"] == "running" for job, _ in children):
                 time.sleep(args.poll_seconds)
-        state["status"] = "completed" if all(job["status"] == "completed" for job, _ in children) else "completed_with_failures"
+        state["status"] = "completed" if all(job["status"] == "completed" for job in state["jobs"]) else "completed_with_failures"
         save()
         if state["status"] == "completed":
             label = "HPGI" if config["method"] == "hpgi" else "Joint PPO"
@@ -270,6 +275,8 @@ def execute(args):
             with (directory / "plot.log").open("w", encoding="utf-8") as stream:
                 result = subprocess.run(command, cwd=root, stdout=stream, stderr=subprocess.STDOUT)
             state["plot_exit_code"] = result.returncode
+            if result.returncode != 0:
+                state["status"] = "training_completed_plot_failed"
             save()
         return 0 if state["status"] == "completed" else 1
     except Exception as error:
