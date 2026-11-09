@@ -13,6 +13,7 @@ dependencies = ["numpy>=1.24", "scipy>=1.10", "torch>=2.2", "tqdm>=4.66"]
 test = ["pytest>=7", "tensorboard>=2.14"]
 monitoring = ["tensorboard>=2.14"]
 profiling = ["torchvision>=0.17", "Pillow>=9"]
+plotting = ["matplotlib>=3.8", "SciencePlots==2.2.2"]
 
 [project.scripts]
 mist-sim = "mist_sim.cli:main"

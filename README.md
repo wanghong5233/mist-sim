@@ -14,6 +14,7 @@
 |---|---|
 |[IMPLEMENTATION.md](IMPLEMENTATION.md)|唯一当前实现规格：模型、state/action张量、奖励、PPO、轨迹长度与更新节奏|
 |[强化学习排障与经验复用](docs/RL_TROUBLESHOOTING.md)|已经定位的问题、证据入口及向HPGI/学习基线迁移的检查顺序|
+|[学习曲线与图表复现](docs/PLOTTING.md)|SciencePlots中文/英文样式、真实CSV绘图、多种子阴影与图表来源管理|
 |[data/README.md](data/README.md)|本地剖面、原始输入和恢复边界|
 |[scripts/README.md](scripts/README.md)|可执行脚本索引|
 |[AGENTS.md](AGENTS.md)|执行与文档维护约束|
@@ -27,8 +28,8 @@ mist-sim/
 ├── configs/       环境/算法JSON及组合入口
 ├── src/mist_sim/  唯一可安装源码；环境、PPO、基线、数据与指标
 ├── tests/         手算、反例、训练及恢复回归测试
-├── scripts/       data/数据处理，validation/核验，maintenance/维护
-├── docs/          强化学习排障与经验复用指南
+├── scripts/       data/数据处理，validation/核验，maintenance/维护，plotting/绘图
+├── docs/          强化学习排障、图表统计及复现说明
 ├── data/          raw/原始输入，profiling/剖析及来源，processed/仿真数值输入
 ├── logs/runs/     正式训练/评价的运行记录，执行时创建
 ├── results/       每次运行的原始结果CSV，以及据此生成的统计表和论文图
@@ -38,6 +39,16 @@ mist-sim/
 采用[Python标准src布局](https://packaging.python.org/en/latest/discussions/src-layout-vs-flat-layout/)。日志采用“一个运行一个目录”：PyTorch的[SummaryWriter](https://docs.pytorch.org/docs/stable/tensorboard.html)支持指定log_dir，[CleanRL PPO](https://github.com/vwxyzjn/cleanrl/blob/fe8d8a03c41a7ef5b523e2e354bd01c363e786bb/cleanrl/ppo.py)按run_name隔离事件。本项目统一指定logs/runs，不依赖工具的默认顶层runs目录；该路径是项目约定，并非唯一行业标准。
 
 测试文件和权重在系统临时目录，退出清理；检查/维护脚本默认只打印，确需排障才显式指定输出到tmp。数据剖析归data，不算强化学习实验结果。尚未正式训练时logs/runs与results不放占位文件，也不提前生成空分类。正式训练成功/失败均保留，不按性能好坏删除。
+
+## 由结果CSV绘图
+
+安装可选依赖`python -m pip install -e ".[plotting]"`，从工程根运行：
+
+```powershell
+& D:/Anaconda/envs/pytorch/python.exe scripts/plotting/plot_convergence.py --curve "Joint PPO=results/<运行名>"
+```
+
+图片、实际绘图数据快照、聚合CSV、配置及来源清单放`results/<运行名>/figures/convergence/`；一个完整iteration一个点，默认10轮后向均值并保留原始淡线。重复`--curve "算法名=运行目录"`可聚合同算法的独立种子；多算法比较可加`--x total_slots`及`--output results/comparisons/<比较名>/figures/convergence`。单种子不画统计阴影；多种子默认±1标准差，`--band ci95`为种子bootstrap逐点95%区间。中文/英文、指标、尺寸及格式由[绘图配置](configs/plotting/convergence.json)控制，详细语义与重画命令见[绘图说明](docs/PLOTTING.md)。
 
 ## 环境与输入
 

@@ -1,0 +1,20 @@
+{
+  "curves": [],
+  "metrics": ["reward_per_slot", "service"],
+  "x": "iteration",
+  "smoothing_window": 10,
+  "band": "std",
+  "bootstrap_samples": 5000,
+  "bootstrap_seed": 0,
+  "languages": ["zh", "en"],
+  "width_mm": 90,
+  "height_mm": 65,
+  "font_size": 9,
+  "dpi": 450,
+  "formats": ["png", "pdf", "svg"],
+  "chinese_fonts": ["SimSun", "Noto Serif CJK SC", "Source Han Serif SC", "Microsoft YaHei"],
+  "latin_font": "Times New Roman",
+  "show_raw": true,
+  "references": [],
+  "output": null
+}

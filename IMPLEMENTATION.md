@@ -112,6 +112,14 @@ RolloutTensors按float32/int64/bool打包整批输入，各一块连续存储；
 
 conditional终端按Iteration及两个步骤显示服务器PPO、调度PPO；进度条单行更新，末尾汇总采样平均reward/slot、两层loss、采样/PPO耗时。TensorBoard的iteration/train与cycles.csv采用完整交替编号。HPGI和joint_ppo均仅在diagnostics.phase_interval命中时执行输入归一化/激活饱和度的额外前向和详细行为/更新审计；HPGI按各组件更新次数独立计数，避免偶数间隔永远只覆盖交替中的一侧。优势、KL、梯度、概率复算与CSV仍每轮保留。显式启用validation时才增加第三步和对应评价结果，打印同样使用单槽均值；episode累计回报单列，不与归一化训练reward混用。
 
+## 结果绘图
+
+plotting.py只读取完成的cycles.csv；scripts/plotting/plot_convergence.py是统一入口，configs/plotting/convergence.json管理样式/统计。直接复用SciencePlots 2.2.2的science/ieee/no-latex，中文宋体、西文Times，PNG及嵌入字体PDF/轮廓SVG。iteration用于同方法训练趋势，total_slots包含预训练开销、用于不同机制交互效率比较；不补造iteration=0或预训练期间不存在的cycle点。
+
+原始指标保留不变；展示时每种子先做同窗口后向均值，初始窗口只用已发生的点，再按精确共同横坐标求种子均值。单种子无统计带；多种子默认±1样本标准差，可切换整条种子bootstrap的逐点95%区间。不把时间窗口当独立种子，不外推短曲线或复制终值。图片、source_data.csv快照、aggregate.csv、plot_config和provenance写入同一结果目录的figures/convergence；快照及原CSV/代码/样式哈希使运行中绘图也可精确重现。重画已保存配置时检查快照哈希，不重新读取不断追加的原CSV。采样均值不称作固定验证/测试成绩，详见docs/PLOTTING.md。
+
+## 实现来源
+
 - [CleanRL PPO](https://github.com/vwxyzjn/cleanrl/blob/fe8d8a03c41a7ef5b523e2e354bd01c363e786bb/cleanrl/ppo.py)：fe8d8a03c41a7ef5b523e2e354bd01c363e786bb，MIT；正交初始化、Adam、GAE、clip/KL/梯度经验参考，没有复制源码文件。
 - [SB3](https://github.com/DLR-RM/stable-baselines3/tree/0cdcd200deef06b9ad0af72f6ddfb07c06c6df39)：MIT；终止/截断、种子与评价核对。[MaskablePPO](https://github.com/Stable-Baselines-Team/stable-baselines3-contrib/tree/a8af63682070df0bda9707400b2e971055600910)：MIT；掩码语义核对，不调用其learn。
 - [MERA来源及许可](references/README.md)：只读参考，未移植其DDPG、合成资源或奖励。

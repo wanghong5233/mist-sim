@@ -5,6 +5,7 @@
 |目录|入口|用途|
 |---|---|---|
 |training/|compare_mechanisms.py --slots 32768|共同预训练后，等物理槽预算比较HPGI与joint_ppo；--overlay将同一加速/学习配置应用到双方。默认无独立评价，--evaluation-trajectories N仅结束时评价一次|
+|plotting/|plot_convergence.py --curve "Joint PPO=results/<运行名>"|只读cycles.csv生成中英文学习曲线，支持多算法/独立种子、iteration/物理槽、滑动均值和标准差/置信带；图与复现快照归对应results的figures/convergence，详见docs/PLOTTING.md|
 |validation/|benchmark_collection.py --checkpoint 路径|同冻结策略和8条输入轨迹比较2/4/6/8worker；区分冷启动、重复暖池中位数、worker墙钟/CPU/P3及回传等待，核对动作/概率/物理结果哈希；仅打印，旧快照只作诊断|
 |validation/|diagnose_learning.py --checkpoint 路径|默认检查策略/熵梯度和固定公开状态的8次局部PPO学习；--joint-updates N --lambdas .95 .8对比GAE lambda，--normalization global或phase控制优势标准化。仅在内存采样/更新，前后用相同两条诊断轨迹比较，不续训旧记录、不写正式结果|
 |validation/|inspect_learning_quality.py --run 路径 --stage cycle_022_joint|只读复算奖励分项、可避免的高成本动作、终止处价值误差、按时间位置分组的优势方差；完整gamma=1联合轨迹另与留一episode的剩余时间基线对比。仅打印及输入哈希，不更新参数，不写结果|
@@ -28,4 +29,4 @@
 
 profile_models与export_profiles的持久输出在data/profiling，数值输入在data/processed。检查、诊断、维护脚本默认打印到终端；--output或--summary仅用于显式排障导出（放tmp，用完删除）。验证套件的报告、日志、CSV均位于系统临时空间，退出删除。正式训练/评价自动写results/<运行名>中的原始CSV；后续图表以CSV为输入，不能把results作为检查脚本默认落盘目录。
 
-训练用量预览用`python -m mist_sim train --config configs/conditional.json --dry-run`；TensorBoard与停止/恢复命令在README维护。测试产物默认临时目录、退出删除；需要保留排障原始文件时显式指定新目录。正式结果保留成功和失败。不创建空plots目录；有绘图入口时再增加。
+训练用量预览用`python -m mist_sim train --config configs/conditional.json --dry-run`；TensorBoard与停止/恢复命令在README维护。测试产物默认临时目录、退出删除；需要保留排障原始文件时显式指定新目录。正式结果保留成功和失败。plotting目录只放统一绘图入口，图片及统计数据在results对应运行或比较目录，不放脚本目录。
