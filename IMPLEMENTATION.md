@@ -58,7 +58,7 @@ PPO的critic目标是**GAE lambda-return `A+V_old`**，不是完整Monte Carlo�
 |交替快层|1024个快层transition|1024槽/8条|每epoch16批，最多80步|
 |交替慢层|256个区间transition|1024槽/8条|每epoch4批，最多20步|
 
-预训练总量8192按fast_slots分块，最后一块允许不足1024；块后更新再重新采样，恢复跳过已保存的完成块。之后最多3000次慢/快交替，HPGI上限6152192训练槽，校准/验证另计。保留128槽episode与每rollout八条完整轨迹：GAE有效记忆约20快槽/80慢层物理槽，128槽覆盖多次Q4控制及唤醒。PPO最多5epoch、KL=.03保护，网络、学习率和奖励不随停止规则改变。convergence只读取完整交替后的原始固定评价回报，双窗口均值、趋势与波动都稳定且完成尾部轮次才停止；确定性和采样评价分别检查。状态存于validation_history以支持恢复，具体阈值见配置与README，不将经验平台称为成功学习或最优性证明。
+预训练8192槽按fast_slots分块，之后最多3000次慢/快交替，上限6152192训练槽，校准另计。conditional禁用额外独立评价；一个完整iteration只有两个组件的采样及PPO更新。保持128槽episode、rollout及最多5epoch/KL=.03；不通过缩短有限时域改变目标。cycles.csv汇总真实采样的按槽平均奖励、两层loss与耗时，cycle_history及稳定窗口保存恢复。稳定判据分别检查整体、慢层、快层原始采样奖励，不增加环境交互；这不是更新后冻结策略的测试分数。
 
 17槽episode的慢层持续长度为4/4/4/4/1。真实终止不bootstrap；采样截断使用正确下一观测和价值，GAE不跨重置。新collect从新episode开始，截断后未采样的后缀不补造。若horizon/Q/方法改变，物理交互预算必须重新核算：Q1、Always-On、仅慢层学习不能凭相同cycles宣称公平。
 
@@ -86,7 +86,7 @@ PPO更新通过`policies/batching.py`执行小批张量前向/反向：按候选
 
 `runtime.torch_threads`可配置CPU算子线程数，默认1；小网络串行采样与批量更新对线程数的收益不同，需按整条链路实测，不能用线程数推断并行效率。`scripts/validation/benchmark_batching.py`默认使用合成变长输入，也可传--behavior读取已有轨迹，只测量不写结果或更新权重。
 
-终端按完整交替轮次显示Iteration及三个步骤：服务器PPO、调度PPO、联合评价。采样、epoch和评价轨迹进度使用tqdm临时单行，结束清除；非交互输出省略进度条。每轮摘要记录联合评价原始平均episode回报、成本/时隙、按时率及两个组件各自的样本加权平均loss。详细逐epoch诊断仍写stdout.log、progress.jsonl和TensorBoard；关闭writer后才计算文件哈希。CSV的iteration字段保留组件更新计数，validation.csv的cycle_index表示完整轮次；确定性与固定种子概率采样reward分列，启用convergence时共同决定稳定停止。原始episode回报和固定验证回报不受归一化尺度影响；训练奖励/尺度/裁剪次数另列。具体命令、停止开关和目录说明只在README维护。
+conditional终端按Iteration及两个步骤显示服务器PPO、调度PPO；进度条单行更新，末尾汇总采样平均reward/slot、两层loss、采样/PPO耗时。TensorBoard的iteration/train与cycles.csv采用完整交替编号。详细行为/更新审计按diagnostics.phase_interval采样保存，轻量统计与CSV每轮保留。显式启用validation时才增加第三步和对应评价结果，打印同样使用单槽均值；episode累计回报单列，不与归一化训练reward混用。
 
 - [CleanRL PPO](https://github.com/vwxyzjn/cleanrl/blob/fe8d8a03c41a7ef5b523e2e354bd01c363e786bb/cleanrl/ppo.py)：fe8d8a03c41a7ef5b523e2e354bd01c363e786bb，MIT；正交初始化、Adam、GAE、clip/KL/梯度经验参考，没有复制源码文件。
 - [SB3](https://github.com/DLR-RM/stable-baselines3/tree/0cdcd200deef06b9ad0af72f6ddfb07c06c6df39)：MIT；终止/截断、种子与评价核对。[MaskablePPO](https://github.com/Stable-Baselines-Team/stable-baselines3-contrib/tree/a8af63682070df0bda9707400b2e971055600910)：MIT；掩码语义核对，不调用其learn。

@@ -9,29 +9,33 @@ DEFAULT_CONVERGENCE = dict(enabled=False, min_cycles=100, window=20,
 
 def reward_stability(history, settings, horizon):
     cycles = [row for row in history if row["stage"].startswith("cycle_")]
-    count, window = len(cycles), settings["window"]
+    count = int(cycles[-1]["stage"].split("_")[1]) + 1 if cycles else 0
+    window = settings["window"]
     result = dict(enabled=settings["enabled"], cycles=count, ready=False,
                   stable=False, stable_checks=0, detected_cycle=None,
                   tail_remaining=None, stop=False, modes={})
-    if not settings["enabled"] or count < max(settings["min_cycles"], 2 * window):
+    if not settings["enabled"] or count < settings["min_cycles"] or len(cycles) < 2 * window:
         return result
     rows = cycles[-2 * window:]
     modes = ["metrics"]
+    modes.extend(mode for mode in ("upper_metrics", "lower_metrics") if mode in rows[-1])
     if any("sampled_metrics" in row for row in rows):
         if not all("sampled_metrics" in row for row in rows):
             raise ValueError("Sampled evaluation coverage changed within stability window")
         modes.append("sampled_metrics")
     for mode in modes:
         values = np.asarray([-row[mode]["conservative_cost"] /
-                             (len(row["trajectories"]) * horizon) for row in rows], dtype=float)
+                             row[mode].get("physical_slots", row.get("physical_slots", len(row.get("trajectories", [])) * horizon))
+                             for row in rows], dtype=float)
         if not np.isfinite(values).all():
             raise FloatingPointError("Nonfinite convergence reward")
         previous, recent = values[:window], values[window:]
         scale = max(abs(float(previous.mean())), 1.)
         mean_change = abs(float(recent.mean() - previous.mean())) / scale
-        offsets = np.arange(len(values), dtype=float)
+        offsets = np.asarray([int(row["stage"].split("_")[1]) + 1 for row in rows], dtype=float)
+        span = float(offsets[-1] - offsets[0])
         offsets -= offsets.mean()
-        trend = abs(float(np.dot(offsets, values - values.mean()) / np.dot(offsets, offsets))) * (len(values) - 1) / scale
+        trend = abs(float(np.dot(offsets, values - values.mean()) / np.dot(offsets, offsets))) * span / scale
         spread = float(recent.std()) / scale
         result["modes"][mode] = dict(previous_reward_mean=float(previous.mean()),
             reward_mean=float(recent.mean()), relative_mean_change=mean_change,
@@ -41,7 +45,7 @@ def reward_stability(history, settings, horizon):
                     spread <= settings["relative_std_tolerance"]))
     result["ready"] = True
     result["stable"] = all(mode["stable"] for mode in result["modes"].values())
-    previous = cycles[-2].get("convergence", {}) if count > 1 else {}
+    previous = cycles[-2].get("convergence", {}) if len(cycles) > 1 else {}
     if result["stable"]:
         result["stable_checks"] = previous.get("stable_checks", 0) + 1
         result["detected_cycle"] = previous.get("detected_cycle")

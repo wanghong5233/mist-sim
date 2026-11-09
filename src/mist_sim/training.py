@@ -88,6 +88,7 @@ class Trainer:
         self.epoch_counts = {"upper": 0, "lower": 0}
         self.training_episodes = 0
         self.stop_reason = None
+        self.cycle_history = []
 
     @property
     def minimal_checkpoints(self):
@@ -273,6 +274,8 @@ class Trainer:
         frozen_before = state_hash(frozen)
         units = self.reward_normalizer.units()
         started = time.perf_counter()
+        detail_interval = self.config.get("diagnostics", {}).get("phase_interval", 1)
+        detailed = len(self.completed_stages) % detail_interval == 0
         self.event("phase_started", stage=name, layer=layer, target_samples=count)
         for parameter in frozen.parameters():
             parameter.requires_grad_(False)
@@ -285,7 +288,7 @@ class Trainer:
             rollout = rollout_diagnostics(buffer, layer_settings(self.config, layer))
             diagnostics_seconds = time.perf_counter() - diagnostics_started
             trace_started = time.perf_counter()
-            if self.store:
+            if self.store and detailed:
                 self.store.write_json(f"traces/phases/{name}/behavior.json", pack_behavior(buffer.samples))
                 self.store.write_json(f"traces/phases/{name}/inputs.json", input_diagnostics)
                 self.store.write_json(f"traces/phases/{name}/rollout.json", rollout)
@@ -298,7 +301,7 @@ class Trainer:
             probability_check_seconds = time.perf_counter() - probability_started
             if max(differences, default=0) > 1e-5:
                 raise AssertionError("Behavior probability changed before update")
-            audit = {}
+            audit = {} if detailed else None
             update_started = time.perf_counter()
             self.event("update_started", stage=name, samples=len(buffer.samples))
             def report_epoch(summary):
@@ -307,7 +310,7 @@ class Trainer:
             diagnostics = update(policy, self.optimizers[layer], buffer, layer_settings(self.config, layer),
                                  self.versions[layer], self.versions[opponent], audit, self.check_budget, report_epoch)
             updated = time.perf_counter()
-            if self.store:
+            if self.store and detailed:
                 self.store.write_json(f"traces/phases/{name}/update.json", audit)
             self.versions[layer] += 1
             if state_hash(frozen) != frozen_before:
@@ -317,6 +320,7 @@ class Trainer:
                 parameter.requires_grad_(True)
         metrics = dict(iteration=len(self.history) + 1, stage=name, layer=layer,
                        physical_slots=len(records), raw_reward_sum=sum(record["reward"] for record in records),
+                       detailed_trace=detailed,
                        raw_reward_per_slot=sum(record["reward"] for record in records) / len(records),
                        behavior_logprob_error=max(differences, default=0),
                        reward_units=units,
@@ -342,7 +346,8 @@ class Trainer:
         self.reward_normalizer.observe(records)
         self.phase_in_progress = False
         if self.store:
-            self.store.write_json(f"traces/phases/{name}/physical.json", records)
+            if detailed:
+                self.store.write_json(f"traces/phases/{name}/physical.json", records)
             self.store.append_metrics(metrics)
             if not self.minimal_checkpoints:
                 self.save(self.store.path / "checkpoints" / "last.pt")
@@ -351,7 +356,7 @@ class Trainer:
                 directory = self.store.path / "checkpoints"
                 self.save(directory / f"snapshot_{name}.pt")
                 trim_snapshots(directory, "snapshot_*.pt", policy["keep_stages"])
-            self.store.retain_traces("phases", self.completed_stages)
+            self.store.retain_traces("phases", [row["stage"] for row in self.history if row.get("detailed_trace", True)])
         self.event("phase_completed", stage=name, layer=layer, service=metrics["on_time_rate"],
                    loss=metrics["loss"],
                    activation_probability=metrics.get("activation_probability"),
@@ -387,7 +392,8 @@ class Trainer:
         self.event("calibration_completed", episodes=self.config["training"]["calibration_episodes"])
         if self.store and not self.completed_stages and not self.minimal_checkpoints:
             self.save(self.store.path / "checkpoints" / "initial.pt")
-        if not self.validation_history:
+        validation_enabled = self.config.get("validation", {}).get("enabled", True)
+        if validation_enabled and not self.validation_history:
             self.validate_cycle("initial")
         if self.controller.learn_lower and "pretrain" not in self.completed_stages:
             total = self.config["training"]["pretrain_slots"]
@@ -397,13 +403,17 @@ class Trainer:
                 name = "pretrain" if offset + count == total else f"pretrain_{chunk:03d}"
                 if name not in self.completed_stages:
                     self.phase(name, "lower", count, pretrain=True)
-        if self.controller.learn_lower and "pretrain" not in [item["stage"] for item in self.validation_history]:
+        if validation_enabled and self.controller.learn_lower and "pretrain" not in [item["stage"] for item in self.validation_history]:
             self.validate_cycle("pretrain")
-        finished_cycles = sum(item["stage"].startswith("cycle_") for item in self.validation_history)
+        elif self.store and not validation_enabled:
+            self.save(self.store.path / "checkpoints" / "last.pt")
+        finished_cycles = max((int(stage.split("_")[1]) + 1 for stage in self.completed_stages
+                               if stage.startswith("cycle_")), default=0)
         target = max(self.config["training"]["cycles"], finished_cycles) + extra_cycles
         self.stop_reason = "configured_cycles_completed"
+        stopping_history = self.validation_history if validation_enabled else self.cycle_history
         for cycle in range(target):
-            if self.validation_history[-1].get("convergence", {}).get("stop", False):
+            if stopping_history and stopping_history[-1].get("convergence", {}).get("stop", False):
                 self.stop_reason = "reward_stable"
                 break
             for layer, enabled, count in (
@@ -413,19 +423,54 @@ class Trainer:
                 if enabled and name not in self.completed_stages:
                     self.phase(name, layer, count)
             validation_stage = f"cycle_{cycle:03d}"
-            if validation_stage not in [item["stage"] for item in self.validation_history]:
+            if validation_enabled and validation_stage not in [item["stage"] for item in self.validation_history]:
                 self.validate_cycle(validation_stage)
-            if self.validation_history[-1].get("convergence", {}).get("stop", False):
+            elif not validation_enabled and validation_stage not in [item["stage"] for item in self.cycle_history]:
+                self.record_training_cycle(validation_stage)
+                interval = self.config.get("checkpoint_policy", {}).get("cycle_interval", 250)
+                if self.store and self.minimal_checkpoints and (cycle + 1) % interval == 0:
+                    self.save(self.store.path / "checkpoints" / "last.pt")
+            if stopping_history and stopping_history[-1].get("convergence", {}).get("stop", False):
                 self.stop_reason = "reward_stable"
                 break
-        records, metrics, per_trajectory = self.evaluate_validation()
+        if validation_enabled:
+            records, metrics, per_trajectory = self.evaluate_validation()
+            if self.store:
+                self.store.write_json("traces/validation/final.json", records)
+                self.store.write_json("validation_metrics.json", metrics)
+                self.store.write_json("validation_trajectories.json", per_trajectory)
         if self.store:
-            self.store.write_json("traces/validation/final.json", records)
-            self.store.write_json("validation_metrics.json", metrics)
-            self.store.write_json("validation_trajectories.json", per_trajectory)
             self.save(self.store.path / "checkpoints" / ("last.pt" if self.minimal_checkpoints else "final.pt"))
         self.event("training_completed", reason=self.stop_reason)
         return self.history
+
+    def record_training_cycle(self, stage):
+        phases = [row for row in self.history if row["stage"] in (stage + "_upper", stage + "_lower")]
+        slots = sum(row["physical_slots"] for row in phases)
+        arrivals = sum(row["arrivals"] for row in phases)
+        completed = sum(row["completed"] for row in phases)
+        cost = sum(row["conservative_cost"] for row in phases)
+        row = dict(stage=stage, physical_slots=slots, metrics=dict(conservative_cost=cost))
+        fields = dict(stage=stage, cycle_index=int(stage.split("_")[1]) + 1, physical_slots=slots,
+                      reward_per_slot=sum(phase["raw_reward_sum"] for phase in phases) / slots,
+                      cost_per_slot=cost / slots, service=completed / arrivals if arrivals else None,
+                      collection_seconds=sum(phase["collection_seconds"] for phase in phases),
+                      update_seconds=sum(phase["update_seconds"] for phase in phases),
+                      phase_seconds=sum(phase["phase_seconds"] for phase in phases))
+        for layer in ("upper", "lower"):
+            phase = next((phase for phase in phases if phase["layer"] == layer), None)
+            fields[layer + "_reward_per_slot"] = phase["raw_reward_per_slot"] if phase else None
+            fields[layer + "_loss"] = phase["loss"] if phase else None
+            if phase:
+                row[layer + "_metrics"] = dict(conservative_cost=phase["conservative_cost"], physical_slots=phase["physical_slots"])
+        self.cycle_history.append(row)
+        row["convergence"] = reward_stability(self.cycle_history,
+            self.config.get("convergence", DEFAULT_CONVERGENCE), self.config["horizon"])
+        if self.store:
+            self.store.append_result("cycles.csv", dict(total_slots=self.total_slots, **fields))
+            self.store.write_json("cycle_history.json", self.cycle_history)
+        self.event("cycle_completed", **fields)
+        self.record_convergence(stage, row["convergence"])
 
     def validate_cycle(self, stage):
         from .diagnostics import check_physics
@@ -450,6 +495,7 @@ class Trainer:
             record.update(sampled_metrics=sampled_metrics, sampled_eligible=sampled_ok,
                           sampled_trajectories=sampled_trajectories)
             sampled_fields = dict(sampled_cost_per_slot=sampled_metrics["conservative_cost"] / len(sampled_records),
+                                  sampled_reward_per_slot=sum(r["reward"] for r in sampled_records) / len(sampled_records),
                                   sampled_return_per_episode=sum(r["reward"] for r in sampled_records) / len(sampled_trajectories),
                                   sampled_service=sampled_metrics["on_time_rate"],
                                   sampled_active_servers=sampled_metrics["active_server_slots"] / len(sampled_records))
@@ -502,13 +548,16 @@ class Trainer:
                    cost=metrics["conservative_cost"], eligible=service_ok, selected=improved,
                    cost_per_slot=metrics["conservative_cost"] / len(records),
                    return_per_episode=sum(record["reward"] for record in records) / len(per_trajectory),
+                   reward_per_slot=sum(record["reward"] for record in records) / len(records),
                    energy_per_slot=metrics["total_energy"] / len(records),
                    validation_seconds=record["measured_seconds"], **sampled_fields)
-        if stage.startswith("cycle_") and record["convergence"]["enabled"]:
-            stability = record["convergence"]
+        self.record_convergence(stage, record["convergence"])
+
+    def record_convergence(self, stage, stability):
+        if stage.startswith("cycle_") and stability["enabled"]:
             if self.store:
                 row = {key: value for key, value in stability.items() if key != "modes"}
-                for mode in ("metrics", "sampled_metrics"):
+                for mode in ("metrics", "sampled_metrics", "upper_metrics", "lower_metrics"):
                     for key in ("reward_mean", "relative_mean_change", "relative_trend", "relative_std"):
                         row[f"{mode}_{key}"] = stability["modes"].get(mode, {}).get(key)
                 self.store.append_result("convergence.csv", dict(stage=stage, **row))
@@ -528,6 +577,7 @@ class Trainer:
                    "total_slots": self.total_slots, "calibrated": self.calibrated,
                    "epoch_counts": self.epoch_counts, "training_episodes": self.training_episodes,
                    "validation_history": self.validation_history, "best_validation_cost": self.best_validation_cost,
+                   "cycle_history": self.cycle_history,
                    "best_stage": self.best_stage, "best_checkpoint_path": self.best_checkpoint_path,
                    "rng": {"python": random.getstate(), "numpy": np.random.get_state(), "torch": torch.get_rng_state()}}
         temporary = path.with_suffix(".partial")
@@ -556,6 +606,7 @@ class Trainer:
                     "validation_history", "best_validation_cost", "best_stage", "best_checkpoint_path"):
             setattr(trainer, key, payload[key])
         random.setstate(payload["rng"]["python"])
+        trainer.cycle_history = payload.get("cycle_history", [])
         np.random.set_state(payload["rng"]["numpy"])
         torch.set_rng_state(payload["rng"]["torch"])
         return trainer

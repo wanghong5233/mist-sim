@@ -30,7 +30,9 @@ def describe_schedule(config, extra_cycles=0):
             "slow_transitions_per_rollout": training["slow_intervals"] if upper else 0,
             "slow_physical_slots_per_rollout": slow, "planned_training_slots": pretrain + cycles * (fast + slow),
             "calibration_slots": training["calibration_episodes"] * config["horizon"],
-            "validation_trajectories_per_check": config.get("validation", {}).get("trajectories", 1),
+            "validation_enabled": config.get("validation", {}).get("enabled", True),
+            "validation_trajectories_per_check": config.get("validation", {}).get("trajectories", 1)
+                if config.get("validation", {}).get("enabled", True) else 0,
             "stopping": config.get("stopping", {"max_slots": None, "max_seconds": None}),
             "ppo": {layer: {"epochs": settings["epochs"], "minibatch": settings["minibatch"],
                               "learning_rate": settings["learning_rate"], "learning_rate_schedule": "constant",

@@ -108,13 +108,14 @@ logs/runs/<运行名>/
 
 日志用于排障，traces用于详细复算，checkpoints用于恢复。正式数值结果在results/<同一运行名>/：iterations.csv每次新采样和PPO更新一行；episodes.csv每个完整episode一行；validation.csv每次固定开发集评价一行；evaluation.csv保存独立评价指标。每个目录带配置及来源/校验清单。仅在对应事件发生时创建文件，不预建空目录；中断前已完成的结果保留并标记运行状态。显式--output-dir用于临时验证时，结果在该运行包的results内，随临时包一起清理。
 
-收敛图可用iteration作横轴；一个iteration是一个层的新rollout加一次PPO更新，stage/layer区分预训练、慢层和快层，不能混成同一条回报曲线。跨算法比较优先用total_slots（累计实际训练交互槽数），避免各方法每次迭代的数据量不同。原始CSV不平滑、不舍弃点；绘图时可额外展示滚动均值，并注明窗口。
+conditional训练关闭独立评价（validation.enabled=false）：没有initial、逐轮或final额外轨迹。一个终端iteration是完整慢/快交替；cycles.csv每轮一行，平均奖励为两段实际采样reward之和/物理槽数之和，两层reward和loss分列。它描述更新过程中采样的行为策略，不冒充更新后固定策略的测试成绩。原始CSV不平滑；iterations.csv仍保留组件级更新计数。独立evaluate命令用于后续确有需要的测试。
 
 记录接口分工：RunStore.event只写排障日志/TensorBoard，不创建结果目录；record_episode、record_validation、record_evaluation显式保存对应数值结果。验证同时输出validation_trajectories.csv，逐条保留轨迹种子、到达/完成数及全部评价指标，用于后续复算与配对统计，不必从日志提取。目录按首次实际写入创建，不初始化空CSV或示意曲线。
 
 |结果表|一行对应什么|奖励与统计口径|
 |---|---|---|
 |iterations.csv|单层一次新rollout及随后的PPO更新|原始reward总和/物理槽数；loss按小批次样本数加权，epoch重复不增加奖励样本|
+|cycles.csv|无独立评价时的一次完整交替|两层采样reward按实际物理槽数加权，分列两层reward/loss及采样/PPO耗时|
 |episodes.csv|一个完整episode|raw_return为完整累计回报；不是单步均值，截断片段不当完整episode|
 |validation.csv|固定开发集的一次评价|return_per_episode为轨迹回报均值；service为总完成/总到达|
 |validation_trajectories.csv|某次开发评价的一条轨迹|保留轨迹种子和原始计数，支持独立复算与配对统计|
@@ -138,12 +139,12 @@ conditional配置默认启用TensorBoard，合成测试默认关闭。打开曲�
 
 浏览器访问http://127.0.0.1:6006。`ppo/upper|lower`横轴为该层累计epoch，`train/*`和`validation/*`横轴为累计训练物理槽。重点看固定验证输入的原始回报、成本与服务率，再用loss/KL/熵/梯度排障；PPO loss不要求单调下降。训练奖励尺度变化单独记录，不与原始回报混用。
 
-training.cycles指定完整交替轮数上限，当前3000轮。convergence从第100轮起比较相邻两个20轮窗口：原始评价reward/slot均值相对差≤0.5%、40轮线性趋势相对跨度≤1%、最近20轮相对标准差≤2%。确定性与固定种子采样评价都须满足；连续5次满足后继续20轮，期间不稳定则重置计数，最早第124轮停止。分母为max(abs(前窗口均值),1)，预训练不参与判断。参数是可配置的运行起点，不是收敛保证；平台可能是差策略平台。没有“若干轮不刷新最佳值就停”的规则，不使用PPO loss判停。每轮判断写convergence.csv，summary/manifest记录真实退出原因。恢复保留窗口及计数；--extra-cycles只增加上限，不绕过已满足的稳定早停。
+training.cycles上限3000。conditional的convergence直接使用训练采样原始reward/slot：第100轮起比较相邻两个20轮窗口，均值相对差≤0.5%、趋势相对跨度≤1%、最近20轮相对标准差≤2%；总体与两层分别须满足，避免相反趋势抵消。连续5次满足后继续20轮，不稳定则重置，最早124轮停止。分母max(abs(前窗口均值),1)，预训练不参与；不以PPO loss或连续未刷新最佳值停止。随机采样曲线的平台不证明最优或成功学习。cycle_history及窗口计数进入检查点，convergence.csv保存判据；--extra-cycles不绕过已满足的停止条件。其他配置显式启用评价时仍可用评价回报判停。
 
 此外保留显式--max-slots N/--max-seconds S预算限制、用户中断与错误退出。交互上限在完整rollout前检查，时间上限在槽/小批边界检查；中途打断保存interrupted.pt供诊断，续训使用最近已保存的last.pt。低频保存期间的更新可能需要重跑。KL>.03只结束本批PPO更新，不结束训练；非有限损失/梯度标记failed。
 
 conditional使用checkpoint_policy.mode=minimal：只覆盖last.pt，在启动、预训练完成、每250个完整iteration和正常结束保存，不逐组件/逐轮保存，不保存best或selected副本；最佳评价仅记录数值，不能据此声称存在相应权重。检查点保留网络、优化器、统计及随机状态供中断恢复与后续评价；完整曲线CSV每轮照常保存。其他配置默认full模式保持initial/last/final/best/selected语义，阶段快照须显式开启并设保留上限。
 
-conditional详细诊断仅保留最近2个已完成PPO阶段、最近2组评价（确定性/采样成对）和最近2条训练输入，最终评价另留。input_seeds.jsonl保留全部训练输入种子，结合固定配置/源码/剖面可重建输入；被清理阶段的逐动作轨迹不再支持直接重放。各轮奖励、loss、服务/能耗、逐评价轨迹统计CSV全部保留，不随诊断清理。
+conditional每10次组件更新保存一次完整behavior/update/physical诊断，保留最近2组及最近2条输入；不再每阶段写巨大JSON再清理。input_seeds.jsonl保留全部种子，所有训练CSV/梯度/KL摘要每轮照常记录。未记录或已清理阶段不支持逐动作直接重放。独立评价关闭时不创建validation结果或选择最佳权重。
 
 完整验证套件默认系统临时空间，退出删除轨迹、报告与权重；仅显式`--keep-artifacts tmp/debug-example`保留排障现场，用完删除，不归档。检查结论必要时简短写入SETUP，详细证据可由tests和脚本重建。测试数值不进入论文性能表。

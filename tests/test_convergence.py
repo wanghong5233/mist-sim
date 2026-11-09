@@ -15,7 +15,8 @@ def settings():
 
 
 def add_cycle(history, cost=100., sampled_cost=None):
-    record = dict(stage=f"cycle_{len(history):03d}", metrics=dict(conservative_cost=cost), trajectories=[{}])
+    count = sum(row["stage"].startswith("cycle_") for row in history)
+    record = dict(stage=f"cycle_{count:03d}", metrics=dict(conservative_cost=cost), trajectories=[{}])
     if sampled_cost is not None:
         record["sampled_metrics"] = dict(conservative_cost=sampled_cost)
     history.append(record)

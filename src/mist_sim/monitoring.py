@@ -14,6 +14,7 @@ class ConsoleProgress:
         self.losses = {}
         self.pretrain_total = 0
         self.iteration_total = 0
+        self.steps = 3
 
     def close(self):
         if self.bar is not None:
@@ -43,7 +44,7 @@ class ConsoleProgress:
                     self.cycle, self.started, self.losses = cycle, time.perf_counter(), {}
                     self.write(f"\nIteration {cycle}/{self.iteration_total or '?'}")
                 step, network = (1, "服务器开关网络") if stage.endswith("upper") else (2, "任务调度网络")
-                self.label = f"Iteration {cycle} [{step}/3] {network}"
+                self.label = f"Iteration {cycle} [{step}/{self.steps}] {network}"
             else:
                 number = int(stage.split('_')[1]) + 1 if stage.startswith("pretrain_") else self.pretrain_total
                 self.label = f"准备阶段：预训练 {number}/{self.pretrain_total or '?'}（尚未进入 Iteration 1）"
@@ -62,6 +63,7 @@ class ConsoleProgress:
             probability = (f" | 采样时开启概率均值={activation['mean']:.5f}"
                            f" 范围=[{activation['min']:.5f},{activation['max']:.5f}]" if activation else "")
             self.write(f"{self.label} 完成 | 平均loss={loss_text} | KL={fields['joint_kl']:.4g}"
+                       f" | 平均reward/slot={fields.get('raw_reward_per_slot', 0):.6g}"
                        f" | 采样={fields['collection_seconds']:.2f}s | PPO={fields['update_seconds']:.2f}s" + probability)
         elif event == "validation_started":
             label = f"Iteration {int(stage.split('_')[1]) + 1} [3/3]" if stage.startswith("cycle_") else stage
@@ -77,23 +79,29 @@ class ConsoleProgress:
             losses = " | ".join(f"{name}平均loss={self.losses[layer]:.5g}" for layer, name in
                                 (("upper", "服务器"), ("lower", "调度")) if self.losses.get(layer) is not None)
             timing = f" | 本轮耗时={time.perf_counter() - self.started:.2f}s" if stage.startswith("cycle_") and self.started is not None else ""
-            sampled = (f" | 采样reward/episode={fields['sampled_return_per_episode']:.6g}"
+            sampled = (f" | 采样平均reward/slot={fields['sampled_reward_per_slot']:.6g}"
                        f" | 采样成本/时隙={fields['sampled_cost_per_slot']:.6g}"
                        if "sampled_return_per_episode" in fields else "")
-            self.write(f"{label} | reward/episode={fields['return_per_episode']:.6g}"
+            self.write(f"{label} | 平均reward/slot={fields['reward_per_slot']:.6g}"
                        f" | 成本/时隙={fields['cost_per_slot']:.6g} | 按时率={service_text}"
                        + sampled + (" | " + losses if losses else "") + timing)
         elif event == "training_started":
             schedule = fields.get("schedule", {})
             self.pretrain_total = schedule.get("pretrain_rollouts", 0)
             self.iteration_total = schedule.get("cycles", 0)
+            self.steps = 3 if schedule.get("validation_enabled", True) else 2
             self.write(f"训练启动：准备阶段（校准、预训练 {self.pretrain_total} 次） → Iteration 1～{self.iteration_total}")
+        elif event == "cycle_completed":
+            self.write(f"Iteration {fields['cycle_index']} 完成 | 采样平均reward/slot={fields['reward_per_slot']:.6g}"
+                       f" | 服务器loss={fields['upper_loss']} | 调度loss={fields['lower_loss']}"
+                       f" | 采样={fields['collection_seconds']:.2f}s | PPO={fields['update_seconds']:.2f}s"
+                       f" | 阶段合计={fields['phase_seconds']:.2f}s")
         elif event == "calibration_completed":
             self.write("统计校准完成")
         elif event == "training_stopped":
             self.write(f"训练停止：{fields['reason']}")
         elif event == "training_completed":
-            self.write("训练完成：" + ("评价奖励持续稳定，已完成尾部迭代" if fields.get("reason") == "reward_stable" else "已执行全部配置迭代"))
+            self.write("训练完成：" + ("奖励持续稳定，已完成尾部迭代" if fields.get("reason") == "reward_stable" else "已执行全部配置迭代"))
         elif event == "convergence_checked":
             if fields["ready"]:
                 self.write(f"奖励稳定检查：连续满足 {fields['stable_checks']} 次 | 尾部剩余={fields['tail_remaining']}")
@@ -115,7 +123,7 @@ def format_event(event, fields):
                 f"truncated={rollout['truncated']} batches/epoch={rollout['minibatches_per_epoch']}")
     if event == "validation_completed":
         return (f"{prefix} validation cost/slot={fields['cost_per_slot']:.4g} "
-                f"return/episode={fields['return_per_episode']:.4g} service={fields['service']} "
+                f"reward/slot={fields['reward_per_slot']:.4g} service={fields['service']} "
                 f"time={fields['validation_seconds']:.2f}s selected={fields['selected']}")
     if event == "phase_completed":
         return (f"{prefix} {fields['layer']} rollout complete reward/slot={fields['raw_reward_per_slot']:.4g} "
@@ -125,6 +133,8 @@ def format_event(event, fields):
         return f"{prefix} {fields['layer']} sampling {fields['samples']}/{fields['target_samples']}"
     if event == "training_stopped":
         return f"{prefix} stopped: {fields['reason']}"
+    if event == "cycle_completed":
+        return f"Iteration {fields['cycle_index']} reward/slot={fields['reward_per_slot']:.6g} collection={fields['collection_seconds']:.2f}s PPO={fields['update_seconds']:.2f}s"
     if event == "training_completed":
         return f"{prefix} completed: {fields['reason']}"
     if event == "convergence_checked":
@@ -153,6 +163,10 @@ class TrainingMonitor:
         self.writer.flush()
 
     def record(self, event, fields):
+        if event == "cycle_completed":
+            names = ("reward_per_slot", "upper_reward_per_slot", "lower_reward_per_slot", "upper_loss", "lower_loss",
+                     "service", "collection_seconds", "update_seconds", "phase_seconds")
+            self.scalars("iteration/train", {name: fields[name] for name in names}, fields["cycle_index"])
         if event == "ppo_epoch":
             names = ("loss", "actor_loss", "value_loss", "entropy", "post_update_joint_kl", "clip_fraction",
                      "actor_before", "critic_before", "actor_after", "critic_after", "seconds", "total_slots")
@@ -168,7 +182,7 @@ class TrainingMonitor:
             if fields.get("activation_probability"):
                 self.scalars("train/upper/activation_probability", fields["activation_probability"], fields["total_slots"])
         elif event == "validation_completed":
-            names = ("cost_per_slot", "return_per_episode", "service", "energy_per_slot", "validation_seconds")
+            names = ("cost_per_slot", "return_per_episode", "reward_per_slot", "service", "energy_per_slot", "validation_seconds")
             self.scalars("validation", {name: fields[name] for name in names}, fields["total_slots"])
             self.scalars("validation_sampled", {name: value for name, value in fields.items()
                                                 if name.startswith("sampled_")}, fields["total_slots"])

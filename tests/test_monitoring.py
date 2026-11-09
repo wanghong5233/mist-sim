@@ -48,12 +48,12 @@ def test_console_groups_cycle_and_removes_temporary_progress(tty):
         assert console.bar is None
     console.record("validation_started", {"stage": "cycle_000"})
     console.record("validation_completed", dict(stage="cycle_000", service=0.5,
-                                                return_per_episode=-20., cost_per_slot=2.))
+                                                return_per_episode=-20., reward_per_slot=-2., cost_per_slot=2.))
     console.close()
     output = stream.getvalue()
     assert "Iteration 1 [1/3]" in output and "Iteration 1 [2/3]" in output
     assert "Iteration 1 [3/3]" in output
-    assert output.count("reward/episode=") == 1
+    assert output.count("平均reward/slot=") == 3
     assert "服务器平均loss=0.25" in output and "调度平均loss=0.25" in output
     assert "cycle_000" not in output
     if not tty:
