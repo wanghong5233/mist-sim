@@ -1,5 +1,7 @@
 # 测试范围
 
+test_process_runtime.py检查默认不改OS、非Windows显式拒用、配置布尔校验、200轮预算不提前稳定退出和Trainer入口；Windows子进程通过实际API读回AboveNormal及显式关闭的EXECUTION_SPEED。只修改测试子进程自身，退出后释放，不更改系统电源设置。
+
 test_plotting.py核对后向平滑初始窗口、按独立种子求标准差/可重复bootstrap、异长曲线只取共同坐标、单种子无统计带及重复种子拒用；检查训练中CSV只忽略未完成末行，图形数据快照可在原CSV追加后精确重画，篡改哈希时报错。实际渲染检查需安装可选依赖`.[test,plotting]`，缺少绘图依赖时仅该项跳过；图形产物在系统临时目录中清理，不启动训练或使用GPU。
 
 test_finite_horizon_value.py手算实际采样回报、真实终止/截断/bootstrap、零时长事件、有限时域时钟与单位转换，包括gamma非常接近1时的回报和残差梯度；核对actor仍使用GAE、critic目标独立前向复算、CPU/CUDA串行/批量/整批缓存及梯度一致。并行短训练覆盖尾区间、检查点重载和继续更新。正确性检查不代替长期收益判断。

@@ -46,7 +46,7 @@ HPGI的finite_horizon/sampled_return已通过合成输入的CPU串行与双worke
 HPGI启用本次价值估计经验的预览命令（从工程根运行）：
 
 ```powershell
-& D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --overlay configs/algorithms/cuda_update.json --method hpgi --set ppo.value_model=finite_horizon --set ppo.value_target=sampled_return --seed 4200001 --dry-run
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --overlay configs/algorithms/cuda_update.json --overlay configs/algorithms/hpgi_finite_horizon.json --seed 4200001 --dry-run
 ```
 
 核对后移除`--dry-run`才会训练。其他学习基线替换`--method`，先检查是否有ppo_layers覆盖。**不要把joint_finite_horizon.json直接当HPGI预设：该文件同时把method设为joint_ppo。** 如果显式再用`--method hpgi`覆盖，仍要检查最终配置，避免以为在比较两个方法，实际两次跑了同一个方法。

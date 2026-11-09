@@ -67,6 +67,7 @@ def load_config(path, overlays=(), overrides=()):
     config.setdefault("diagnostics", {"phase_interval": 1})
     config.setdefault("runtime", {"torch_threads": 1})
     config["runtime"].setdefault("collection_workers", 0)
+    config["runtime"].setdefault("windows_performance", False)
     config.setdefault("checkpoint_policy", {"stage_interval": 0, "keep_stages": 2})
     config["checkpoint_policy"].setdefault("mode", "full")
     config["checkpoint_policy"].setdefault("cycle_interval", 250)
@@ -240,6 +241,8 @@ def validate(config):
             raise ValueError("Fixed split must be legal for every configured model")
     threads = config.get("runtime", {}).get("torch_threads", 1)
     workers = config.get("runtime", {}).get("collection_workers", 0)
+    if type(config.get("runtime", {}).get("windows_performance", False)) is not bool:
+        raise ValueError("runtime.windows_performance must be boolean")
     if type(workers) is not int or not 0 <= workers <= 32:
         raise ValueError("runtime.collection_workers must be an integer from 0 to 32")
     if type(threads) is not int or threads < 1:

@@ -1,0 +1,7 @@
+{
+  "method": "hpgi",
+  "ppo": {
+    "value_model": "finite_horizon",
+    "value_target": "sampled_return"
+  }
+}

@@ -103,6 +103,10 @@ class ConsoleProgress:
                        f" | 采样进程={schedule.get('collection_workers', 0)}")
             self.write(f"价值模型={schedule.get('value_model', 'plain')}"
                        f" | critic目标={schedule.get('value_target', 'gae')}")
+            policy = fields.get("process_policy", {})
+            if policy.get("requested"):
+                self.write(f"Windows后台运行试验：PID={policy['pid']}"
+                           f" | 优先级={policy['priority_class']} | HighQoS={policy['high_qos']}")
         elif event == "cycle_completed":
             losses = "".join(f" | {name}loss={fields[layer + '_loss']:.5g}"
                              for layer, name in (("upper", "服务器"), ("lower", "调度"))

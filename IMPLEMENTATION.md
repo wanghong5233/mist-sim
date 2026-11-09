@@ -62,6 +62,10 @@
 
 预训练8192槽按fast_slots分块，之后最多3000次慢/快交替，上限6152192训练槽，校准另计。conditional禁用额外独立评价；一个完整iteration只有两个组件的采样及PPO更新。保持128槽episode、rollout及最多5epoch/KL=.03；不通过缩短有限时域改变目标。cycles.csv汇总真实采样的按槽平均奖励、两层loss与耗时，cycle_history及稳定窗口保存恢复。稳定判据分别检查整体、慢层、快层原始采样奖励，不增加环境交互；这不是更新后冻结策略的测试分数。
 
+configs/training/fixed_200.json将cycles与早停资格min_cycles均设为200；不改变窗口/阈值、网络或采样量，正常运行准确产出200个完整iteration点。hpgi_finite_horizon.json选择HPGI及共享finite_horizon/sampled_return，CPU/CUDA设置另由cuda_update覆盖。该组合总计417792训练槽，校准另计；不同方法仍按CSV实际物理槽比较交互效率。
+
+runtime.windows_performance默认false，显式启用时由Trainer构造器对当前Windows进程设置AboveNormal和HighQoS。worker也构造自己的Trainer，因此逐worker独立设置，不假定Python spawn继承主进程优先级。Win32句柄与结构宽度显式声明，执行后读回priority和power masks，失败抛出原OS错误；不改线程数量、CPU亲和性、管理员权限或全局电源计划。进程PID/策略记录在process_policy.json及worker计时中，用于核对后台运行试验；收益依据真实墙钟/CPU时间判断，不由设置成功推断已加速。
+
 17槽episode的慢层持续长度为4/4/4/4/1。真实终止不bootstrap；采样截断使用正确下一观测和价值，GAE不跨重置。新collect从新episode开始，截断后未采样的后缀不补造。若horizon/Q/方法改变，物理交互预算必须重新核算：Q1、Always-On、仅慢层学习不能凭相同cycles宣称公平。
 
 ## 方法与配置

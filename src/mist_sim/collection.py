@@ -43,6 +43,7 @@ def timed_episode(*args):
     samples, records = collect_episode(*args)
     timing = dict(worker_seconds=time.perf_counter() - started,
                   worker_cpu_seconds=time.process_time() - cpu_started,
+                  process_policy=collector.process_policy,
                   allocation_seconds=sum(record["measured_allocation_seconds"] for record in records),
                   finished_at=time.perf_counter())
     return samples, records, timing

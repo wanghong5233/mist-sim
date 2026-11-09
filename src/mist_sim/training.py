@@ -23,6 +23,7 @@ from .checkpoints import trim_snapshots
 from .rewards import training_reward, RunningRewardNormalizer
 from .schedule import TrainingLimit, rollout_slots, describe_schedule
 from .convergence import DEFAULT_CONVERGENCE, reward_stability
+from .process_runtime import configure_process
 
 CHECKPOINT_SCHEMA = 2
 
@@ -64,6 +65,7 @@ class Trainer:
         if type(seed) is not int or seed < 0 or seed in (config["seeds"]["validation"], config["seeds"]["test"]):
             raise ValueError("Training seed must differ from validation/test seeds")
         self.config, self.seed, self.store = copy.deepcopy(config), seed, store
+        self.process_policy = configure_process(config.get("runtime", {}).get("windows_performance", False))
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -489,8 +491,10 @@ class Trainer:
             raise ValueError("Heuristic baseline uses evaluate, not train")
         schedule = describe_schedule(self.config, extra_cycles, self.completed_stages)
         self.event("training_started", schedule=schedule,
-                   resumed_stages=len(self.completed_stages), max_seconds=max_seconds, max_slots=max_slots)
+                   resumed_stages=len(self.completed_stages), max_seconds=max_seconds, max_slots=max_slots,
+                   process_policy=self.process_policy)
         if self.store:
+            self.store.write_json("process_policy.json", self.process_policy)
             self.save(self.store.path / "checkpoints" / "last.pt")
         self.calibrate()
         self.event("calibration_completed", episodes=self.config["training"]["calibration_episodes"])
