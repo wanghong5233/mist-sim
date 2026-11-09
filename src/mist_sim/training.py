@@ -184,19 +184,23 @@ class Trainer:
             active = [1] * len(self.config["servers"])
             while not environment.done:
                 self.check_budget()
-                upper_frames.append(upper_frame(environment.upper_observation()))
-                proposed, upper_sample = self.controller.upper.upper_action(environment.upper_observation())
-                upper_steps.extend(upper_sample["steps"])
-                if episode % 2 and environment.slot % self.config["window"] == 0:
-                    active = proposed
+                if self.controller.learn_upper:
+                    upper_frames.append(upper_frame(environment.upper_observation()))
+                    proposed, upper_sample = self.controller.upper.upper_action(environment.upper_observation())
+                    upper_steps.extend(upper_sample["steps"])
+                    if episode % 2 and environment.slot % self.config["window"] == 0:
+                        active = proposed
                 problem = environment.begin_slot(active)
-                lower_frames.append(lower_frame(problem))
-                actions, predicted, lower_sample = self.controller.lower.lower_action(problem)
-                lower_steps.extend(lower_sample["steps"])
+                actions, predicted, lower_sample = self.controller.fast(problem)
+                if self.controller.learn_lower:
+                    lower_frames.append(lower_frame(problem))
+                    lower_steps.extend(lower_sample["steps"])
                 environment.execute(actions, predicted)
             self.reward_normalizer.observe(environment.records)
-        self.controller.upper.fit_normalizers(upper_frames, upper_steps)
-        self.controller.lower.fit_normalizers(lower_frames, lower_steps)
+        if self.controller.learn_upper:
+            self.controller.upper.fit_normalizers(upper_frames, upper_steps)
+        if self.controller.learn_lower:
+            self.controller.lower.fit_normalizers(lower_frames, lower_steps)
         self.calibrated = True
 
     def collect(self, layer, count, pretrain=False):
@@ -481,7 +485,8 @@ class Trainer:
             raise ValueError("extra_cycles must be a nonnegative integer")
         if not (self.controller.learn_lower or self.controller.learn_upper):
             raise ValueError("Heuristic baseline uses evaluate, not train")
-        self.event("training_started", schedule=describe_schedule(self.config, extra_cycles),
+        schedule = describe_schedule(self.config, extra_cycles, self.completed_stages)
+        self.event("training_started", schedule=schedule,
                    resumed_stages=len(self.completed_stages), max_seconds=max_seconds, max_slots=max_slots)
         if self.store:
             self.save(self.store.path / "checkpoints" / "last.pt")
@@ -504,9 +509,7 @@ class Trainer:
             self.validate_cycle("pretrain")
         elif self.store and not validation_enabled:
             self.save(self.store.path / "checkpoints" / "last.pt")
-        finished_cycles = max((int(stage.split("_")[1]) + 1 for stage in self.completed_stages
-                               if stage.startswith("cycle_")), default=0)
-        target = max(self.config["training"]["cycles"], finished_cycles) + extra_cycles
+        target = schedule["cycles"]
         self.stop_reason = "configured_cycles_completed"
         stopping_history = self.validation_history if validation_enabled else self.cycle_history
         for cycle in range(target):

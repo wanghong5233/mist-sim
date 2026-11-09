@@ -78,7 +78,9 @@ JointPolicy包装原有两套SetPolicy作为phase条件分支，不增加可见�
 
 所有方法共用环境、指标和PPO核心；[README](README.md)列全部方法入口。Fixed-Window输出无联合容量掩码的离散动作和学习速率，PPO联合密度含原始高斯潜变量；执行前固定投影不修改行为概率，保留投影前违约。Greedy快层比较完整P3增量成本；慢层用上一完整公开区间从全开逐台试关，仅预测总成本下降才接受，不看未来。有界枚举只有完整搜索才报告最优，离线多槽枚举也必须在Q区间内保持开关不变。preflight的物理最坏边界、可执行调度及小网格穷举分别检查单请求、联合可行性和受限动作集差距，不将其冒充HPGI训练结果。
 
-`configs/environments/`管场景，`configs/algorithms/`管采样、网络及优化，顶层JSON组合二者。overlay/--set严格校验键；`ppo_layers.upper/lower`可覆盖宽度、学习率等，gamma共用。12条validation是可改的开发样本量，不是batch或论文固定值；min_service_rate=null，选中最低验证成本不代表服务要求满足。
+`configs/environments/`管场景，`configs/algorithms/`管采样、网络及优化，顶层JSON组合二者。overlay和--set均可向`ppo_layers.upper/lower`添加合法覆盖（宽度、学习率、minibatch等），未知字段/非法取值报错，gamma共用。12条validation是可改的开发样本量，不是batch或论文固定值；min_service_rate=null，选中最低验证成本不代表服务要求满足。
+
+基线校准只调用实际使用的策略组件：Always-On始终全开，Upper-PPO-Greedy执行贪心调度，未使用的网络不推理或拟合归一化。Greedy慢层在同一次启停搜索内复用已验证剖面；不同场景不共享实例。单层进度和续训预算按实际方法/已完成阶段计算，禁用独立评价不影响续训轮数。check的Fixed-Window手写控制器兼容统一评价接口；它仅检查环境核算，evaluate仍要求该学习方法自己的检查点。启发式误用train在创建运行或权重之前报错。
 
 检查点保存优化器、统计、随机状态、阶段、累计物理槽/epoch/完成episode及源码/输入签名。完成阶段last可续训；interrupted/failed_last若包含未完成阶段则只供诊断。槽上限在完整rollout前检查；时间上限在物理槽/优化器小批次边界检查，可能包含当前操作耗时的超出量。stopped与数值错误failed分开；恢复重复的未完成阶段交互单列。新增源码不强行加载旧签名权重。
 

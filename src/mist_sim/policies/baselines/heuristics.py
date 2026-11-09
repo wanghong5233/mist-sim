@@ -1,5 +1,6 @@
 """Causal greedy baselines, using only public problems/history."""
 from ...environment import PublicProblem
+from ...profiles import Profiles
 
 
 def greedy_fast(problem):
@@ -28,6 +29,7 @@ def greedy_slow(observation):
     history = observation["history"][-config["window"]:]
     if not history:
         return [1] * len(config["servers"])
+    profiles = Profiles(config)
 
     def estimate(active):
         cost = 0.0
@@ -35,7 +37,7 @@ def greedy_slow(observation):
         for offset in range(min(config["window"], config["horizon"] - observation["slot"])):
             public = history[offset % len(history)]["public"]
             ready = [old * new for old, new in zip(previous, active)]
-            problem = PublicProblem(config, public, active, ready, observation["slot"], history)
+            problem = PublicProblem(config, public, active, ready, observation["slot"], history, profiles=profiles)
             actions, _, _ = greedy_fast(problem)
             cost += problem.scheduling_cost(actions)
             cost += sum(config["slot_seconds"] * (server["idle_power"] if enabled else server["sleep_power"])

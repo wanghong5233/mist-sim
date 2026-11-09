@@ -53,18 +53,18 @@ mist-sim/
 
 ## 方法与模块
 
-|方法键|实际差异|
-|---|---|
-|hpgi|双层PPO、容量掩码、P3|
-|joint_ppo|同一条物理轨迹上的阶段条件联合PPO；保留配置Q槽开关和逐槽调度|
-|always_on|全开、独立训练快层|
-|fixed_split|逐模型固定合法切分，保留双层训练|
-|single_timescale|Q=1，PPO仍交替冻结|
-|fixed_window|无联合容量掩码、学习速率、执行前投影|
-|upper_ppo_greedy|慢层PPO、容量感知增量成本贪心快层|
-|greedy_consolidation|上一完整区间驱动启停、当前公开候选贪心|
-|nominal|区间中心构造候选，独立训练并报告真实违约|
-|full_information|同发布集合的理想真实信息参照，独立训练|
+|方法键|实际差异|训练组件|
+|---|---|---|
+|hpgi|容量掩码、P3|开关/调度交替PPO|
+|joint_ppo|同轨迹阶段条件联合PPO；保留Q槽开关和逐槽调度|开关/调度联合PPO|
+|always_on|服务器全开|仅调度PPO|
+|fixed_split|逐模型固定合法切分|开关/调度交替PPO|
+|single_timescale|Q=1|开关/调度交替PPO|
+|fixed_window|无联合容量掩码、学习速率、执行前投影|开关/调度交替PPO，含速率密度|
+|upper_ppo_greedy|容量感知增量成本贪心调度|仅开关PPO，无调度预训练|
+|greedy_consolidation|上一完整区间驱动启停、当前公开候选贪心|无需训练，直接evaluate|
+|nominal|区间中心构造候选，报告真实违约|开关/调度交替PPO|
+|full_information|同发布集合的理想真实信息参照|开关/调度交替PPO|
 
 `environment/anonymity/profiles/allocation`负责物理和信息边界；`policies、buffers、ppo、training`负责策略及学习；`evaluation/storage/diagnostics`负责核算、证据及复算。`reference_solvers`为有界离线/单隙枚举，完整搜索才称最优。MERA只作参考，详见[来源说明](references/README.md)。
 
@@ -93,7 +93,17 @@ mist-sim/
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --checkpoint logs/runs/<训练ID>/checkpoints/last.pt --extra-cycles 1
 ```
 
-占位ID替换为实际运行路径；学习方法必须加载自己的权重。`--overlay 文件.json`和`--set ppo.learning_rate=0.0001`严格覆盖配置，未知键报错；上下层可通过ppo_layers独立配置。变更源码/配置/剖面后拒绝无说明续训。
+占位ID替换为实际运行路径；学习方法必须加载自己的权重。`--overlay 文件.json`和`--set ppo.learning_rate=0.0001`严格覆盖配置，未知键报错；上下层可通过`--set ppo_layers.upper.minibatch=64`独立配置。变更源码/配置/剖面后拒绝无说明续训。
+
+其余学习基线复用同一train入口，通过--method选择表中方法；CPU采样、进程池、CUDA更新、整批张量缓存及诊断间隔均共用。单层方法只打印实际更新的组件。示例：
+
+```powershell
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --overlay configs/algorithms/cuda_update.json --method fixed_split --set ppo_layers.upper.minibatch=64 --dry-run
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim evaluate --config configs/conditional.json --method greedy_consolidation --seed 4400019
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim evaluate --checkpoint logs/runs/<训练ID>/checkpoints/last.pt --trace logs/runs/<输入运行ID>/traces/inputs/<输入文件>.json
+```
+
+check/evaluate/reference的--trace接受逐槽请求列表或训练保存的`{seed, trace}`文件；记录原路径、SHA-256及文件内种子，不用命令默认种子冒充输入来源。裸列表的轨迹种子记为空。所有方法可用同一输入评价；续训不能通过--method将已有权重改称另一基线。Q=1、仅开关或仅调度的方法每轮物理槽数不同，比较预算看--dry-run及CSV中的实际槽数。
 
 只切换更新设备可用--device cuda；cuda_update.json另外选择minibatch128及4个CPU采样进程，不改变1024物理槽rollout。进程数可通过--set runtime.collection_workers=8等覆盖，benchmark_collection.py可在同输入下重新测量；本机测量波动较大，4进程不是跨机器最优保证。大块输入按类型整批上传，在多个epoch与KL检查间复用；更新结束后策略及Adam状态回CPU以供采样/保存。相同源码检查点可通过--checkpoint 路径 --device cpu/cuda跨设备继续，其他超参数仍需一致；旧源码检查点不会自动冒充兼容续训。GPU运行记录device_metrics（含搬运/回传/峰值显存）与input_pack_transfer_seconds，整轮效率以实际phase_seconds判断。
 

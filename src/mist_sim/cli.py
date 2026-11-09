@@ -82,12 +82,10 @@ def execute(args):
         if args.device is not None:
             config["device"] = args.device
         trainer = None
+    if args.command == "train" and config["method"] == "greedy_consolidation":
+        raise ValueError("Heuristic baseline uses evaluate, not train")
     if args.dry_run:
-        if config["method"] == "greedy_consolidation":
-            raise ValueError("Heuristic baseline uses evaluate, not train")
-        finished = sum(item["stage"].startswith("cycle_") for item in trainer.validation_history) if trainer else 0
-        extra = max(config["training"]["cycles"], finished) + args.extra_cycles - config["training"]["cycles"]
-        schedule = describe_schedule(config, extra)
+        schedule = describe_schedule(config, args.extra_cycles, trainer.completed_stages if trainer else ())
         schedule["stopping"] = dict(config["stopping"])
         for name in ("max_slots", "max_seconds"):
             if getattr(args, name) is not None:
@@ -138,7 +136,20 @@ def run_command(args, config, trainer):
             result = replay(config, records) if args.command == "replay" else summarize(records)
             store.write_json("summary.json", result)
         else:
-            trace = json.loads(args.trace.read_text(encoding="utf-8")) if args.trace else generate_trace(config, seed)
+            trace_seed = seed
+            if args.trace:
+                payload = json.loads(args.trace.read_text(encoding="utf-8"))
+                trace = payload.get("trace") if isinstance(payload, dict) else payload
+                trace_seed = payload.get("seed") if isinstance(payload, dict) else None
+                if not isinstance(trace, list) or any(not isinstance(batch, list) or
+                        any(not isinstance(item, dict) for item in batch) for batch in trace):
+                    raise ValueError("Trace must be a list of request batches or a {seed, trace} envelope")
+                if trace_seed is not None and (type(trace_seed) is not int or trace_seed < 0):
+                    raise ValueError("Trace seed must be a nonnegative integer or null")
+                store.manifest["trace_input"] = {"path": str(args.trace.resolve()),
+                    "sha256": digest_file(args.trace), "seed": trace_seed}
+            else:
+                trace = generate_trace(config, seed)
             store.write_json("traces/input.json", trace)
             if args.command == "reference":
                 if args.offline:
@@ -158,7 +169,7 @@ def run_command(args, config, trainer):
                 store.write_json("traces/evaluation.json", records)
                 store.write_json("summary.json", metrics)
                 if args.command == "evaluate":
-                    store.record_evaluation(metrics, trajectory_seed=seed)
+                    store.record_evaluation(metrics, trajectory_seed=trace_seed)
                 if args.command == "check":
                     replay(config, records)
         store.finish()
@@ -186,10 +197,10 @@ class KernelCheckController:
     def __init__(self, config):
         self.config = config
 
-    def slow(self, observation, deterministic=False):
+    def slow(self, observation, deterministic=False, record=False):
         return [1] * len(self.config["servers"]), None
 
-    def fast(self, problem, deterministic=False):
+    def fast(self, problem, deterministic=False, record=False):
         from .policies.baselines.heuristics import greedy_fast
         actions, _, _ = greedy_fast(problem)
         _, rates, _, _ = problem.allocate(actions)

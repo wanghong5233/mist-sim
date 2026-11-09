@@ -16,6 +16,7 @@ class ConsoleProgress:
         self.iteration_total = 0
         self.steps = 3
         self.joint = False
+        self.layers = ["upper", "lower"]
 
     def close(self):
         if self.bar is not None:
@@ -44,8 +45,9 @@ class ConsoleProgress:
                 if cycle != self.cycle:
                     self.cycle, self.started, self.losses = cycle, time.perf_counter(), {}
                     self.write(f"\nIteration {cycle}/{self.iteration_total or '?'}")
-                step, network = ((1, "联合事件PPO") if stage.endswith("joint") else
-                                 ((1, "服务器开关网络") if stage.endswith("upper") else (2, "任务调度网络")))
+                layer = stage.rsplit("_", 1)[-1]
+                step = self.layers.index(layer) + 1
+                network = {"joint": "联合事件PPO", "upper": "服务器开关网络", "lower": "任务调度网络"}[layer]
                 self.label = f"Iteration {cycle} [{step}/{self.steps}] {network}"
             else:
                 number = int(stage.split('_')[1]) + 1 if stage.startswith("pretrain_") else self.pretrain_total
@@ -92,17 +94,20 @@ class ConsoleProgress:
             schedule = fields.get("schedule", {})
             self.pretrain_total = schedule.get("pretrain_rollouts", 0)
             self.iteration_total = schedule.get("cycles", 0)
-            self.steps = 3 if schedule.get("validation_enabled", True) else 2
             self.joint = schedule.get("method") == "joint_ppo"
-            if self.joint:
-                self.steps -= 1
+            available = schedule.get("ppo", {"joint": {}} if self.joint else {"upper": {}, "lower": {}})
+            self.layers = [layer for layer in ("joint", "upper", "lower") if layer in available]
+            self.steps = len(self.layers) + int(schedule.get("validation_enabled", True))
             self.write(f"训练启动：准备阶段（校准、预训练 {self.pretrain_total} 次） → Iteration 1～{self.iteration_total}")
             self.write(f"采样设备=cpu | PPO更新设备={schedule.get('update_device', 'cpu')}"
                        f" | 采样进程={schedule.get('collection_workers', 0)}")
         elif event == "cycle_completed":
+            losses = "".join(f" | {name}loss={fields[layer + '_loss']:.5g}"
+                             for layer, name in (("upper", "服务器"), ("lower", "调度"))
+                             if fields.get(layer + "_loss") is not None)
             self.write(f"Iteration {fields['cycle_index']} 完成 | 采样平均reward/slot={fields['reward_per_slot']:.6g}"
-                       f" | 服务器loss={fields['upper_loss']} | 调度loss={fields['lower_loss']}"
-                       f" | 采样={fields['collection_seconds']:.2f}s | PPO={fields['update_seconds']:.2f}s"
+                       + losses
+                       + f" | 采样={fields['collection_seconds']:.2f}s | PPO={fields['update_seconds']:.2f}s"
                        f" | 阶段合计={fields['phase_seconds']:.2f}s")
         elif event == "calibration_completed":
             self.write("统计校准完成")

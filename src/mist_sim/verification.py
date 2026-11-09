@@ -63,7 +63,8 @@ def verify_one(root, config, seed, output_dir):
             assert_close(value, metrics[key], key)
         restored_equal = None
         if trainer:
-            reloaded = Trainer.load(store.path / "checkpoints" / "final.pt")
+            checkpoint = "last.pt" if trainer.minimal_checkpoints else "final.pt"
+            reloaded = Trainer.load(store.path / "checkpoints" / checkpoint)
             restored_records, restored_metrics = evaluate(reloaded.controller, config, trace)
             assert_close(metrics, restored_metrics)
             ignored = ("measured_policy_seconds", "measured_allocation_seconds")
@@ -84,6 +85,9 @@ def verify_one(root, config, seed, output_dir):
             trainer.save(store.path / "checkpoints" / "failed_last.pt")
         store.finish(error)
         raise
+    finally:
+        if trainer:
+            trainer.close()
 
 
 def main():

@@ -87,7 +87,8 @@ def load_config(path, overlays=(), overrides=()):
             if not isinstance(branch, dict) or part not in branch:
                 raise ValueError(f"Unknown override: {key}")
             branch = branch[part]
-        if not isinstance(branch, dict) or parts[-1] not in branch:
+        layer_override = parts[:-1] in (["ppo_layers", "upper"], ["ppo_layers", "lower"])
+        if not isinstance(branch, dict) or (parts[-1] not in branch and not layer_override):
             raise ValueError(f"Unknown override: {key}")
         branch[parts[-1]] = json.loads(value)
     validate(config)

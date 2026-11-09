@@ -1,5 +1,7 @@
 # 测试范围
 
+test_baseline_interfaces.py覆盖其余七个学习基线的CPU/CUDA训练→评价→CSV→重放/汇总→续训；GPU路径用2worker覆盖并行采样，5槽episode检查尾区间。独立复算GAE/loss/服务分母/能耗，检查冻结组件、原行为概率、方法约束及续训权重一致。另查纯贪心无需训练、层级--set校验、单层校准不调用无用网络、进度编号、输入文件来源、minimal检查点，以及Fixed-Window投影前动作/潜变量的CPU与CUDA批量梯度。产物在系统临时目录内自动清理。
+
 test_hpgi_efficiency.py检查交替组件的重型输入诊断门控、global/phase标准化及参数更新等价、公共加速overlay、4worker/CUDA的预训练/交替/恢复、冻结层不变、行为版本刷新与旧buffer拒用；保存记录由独立GAE/loss和物理检查复算。
 
 test_sampling_efficiency.py检查采样缓存命中不重建候选、环境复用已验证剖面、输入轨迹只生成一次、缓存返回值隔离，以及宽数值尺度P3容量/KKT；还检查分组件优势标准化、单元素/常量组、配置与dry-run及独立loss复算。rollout诊断记录更新前分组件优势、时隙相关性和价值拟合；不以更新后的explained variance代替动作收益证据。CPU/CUDA等价更新同时覆盖global和phase标准化。

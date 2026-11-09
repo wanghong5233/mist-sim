@@ -16,12 +16,14 @@ def rollout_slots(config, layer, count):
     return episodes * config["horizon"] + min(tail * config["window"], config["horizon"])
 
 
-def describe_schedule(config, extra_cycles=0):
+def describe_schedule(config, extra_cycles=0, completed_stages=()):
     joint = config["method"] == "joint_ppo"
     lower = config["method"] not in ("upper_ppo_greedy", "greedy_consolidation")
     upper = config["method"] not in ("always_on", "greedy_consolidation")
     training = config["training"]
-    cycles = training["cycles"] + extra_cycles
+    finished = max((int(stage.split("_")[1]) + 1 for stage in completed_stages
+                    if stage.startswith("cycle_")), default=0)
+    cycles = max(training["cycles"], finished) + extra_cycles
     pretrain = training["pretrain_slots"] if lower else 0
     fast = training["fast_slots"] if lower else 0
     slow = rollout_slots(config, "upper", training["slow_intervals"]) if upper else 0
