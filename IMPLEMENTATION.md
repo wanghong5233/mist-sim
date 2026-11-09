@@ -46,7 +46,7 @@
 
 PPO的critic目标是**GAE lambda-return `A+V_old`**，不是完整Monte Carlo回报。日志另列采样片段折扣和（截断末端加bootstrap），两者不可混称。actor用整层rollout的`(A−mean(A))/max(std(A),1e−8)`；单样本不去均值。gamma=1保持有限时域未折扣目标；lambda=.95的TD权重约20个决策步，因此快层约20槽、Q4慢层约80槽，并不等于只需要20条训练数据。
 
-联合logprob按原请求顺序/动作前缀重算并求和；容量掩码参与条件概率。PPO裁剪比率区间[.8,1.2]；loss=actor+.5×(.5×MSE)−.01×entropy。空动作时隙仍更新critic，actor项为零；上下层分别on-policy采样，另一层更新后不能复用旧轨迹。actor/critic各自裁剪梯度范数至.5，Adam lr=3e−4/eps=1e−5；全buffer更新后联合KL>.03提前结束epoch。详细逐批中间量可独立复算。
+联合logprob按原请求顺序/动作前缀重算并求和；容量掩码参与条件概率。PPO裁剪比率区间[.8,1.2]；loss=actor+.5×(.5×MSE)−.01×entropy。空动作时隙仍更新critic，actor项为零。HPGI及其交替变体分别on-policy采样，另一层更新后不复用上一阶段轨迹；joint_ppo使用同一快照的事件buffer联合更新，见方法章节。actor/critic各自裁剪梯度范数至.5，Adam lr=3e−4/eps=1e−5；全buffer更新后联合KL>.03提前结束epoch。详细逐批中间量可独立复算。
 
 ## Episode、rollout与更新节奏
 
