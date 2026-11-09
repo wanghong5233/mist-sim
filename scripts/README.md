@@ -13,6 +13,7 @@
 |validation/|check_profile_chain.py|真实剖面的48槽正确性短更新、重载和续训一致性，退出清理原始产物|
 |validation/|inspect_logs.py|复算已有轨迹、PPO及物理中间量|
 |validation/|benchmark_batching.py|串行参照与批量张量前向/反向等价及交错计时；默认合成输入，--behavior可读已有轨迹，仅打印|
+|validation/|benchmark_update_device.py --checkpoint 路径|独立读取兼容joint检查点，CPU采集最多64槽；32/64事件比较CPU/CUDA前向、反向、裁剪与Adam，单列输入整理/传输及权重回传，检查loss/梯度一致；仅更新内存副本，不写结果、不切换现有训练设备|
 |validation/|report_hpgi_probe.py --run 路径|检查既有训练资产、日志及耗时；不继续训练|
 |validation/|verify_commands.py --workspace 路径|完整验证套件的CLI子检查|
 |validation/|build_verification_index.py --workspace 路径|检查临时套件资产及哈希|
