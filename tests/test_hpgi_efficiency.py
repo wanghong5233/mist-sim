@@ -74,6 +74,74 @@ def test_comparison_accepts_shared_acceleration_overlay(monkeypatch):
     assert config["ppo"]["minibatch"] == 128
 
 
+@pytest.mark.parametrize("workers", [0, 2])
+def test_hpgi_finite_value_tail_discount_freezing_and_resume(config, tmp_path, monkeypatch, workers):
+    config["device"] = "cpu"
+    config["runtime"]["collection_workers"] = workers
+    config["horizon"], config["window"], config["k"] = 5, 4, 1
+    config["reward_normalization"]["enabled"] = True
+    config["validation"]["enabled"] = False
+    config["ppo"].update(value_model="finite_horizon", value_target="sampled_return",
+                         gamma=.97, epochs=1, minibatch=8)
+    config["training"].update(pretrain_slots=6, fast_slots=6, slow_intervals=3,
+                               cycles=2, calibration_episodes=1)
+    config["trace_retention"].update(phases=None, inputs=None)
+    store = RunStore(Path(__file__).resolve().parents[1], config, "check hpgi finite", 91, output_dir=tmp_path)
+    trainer = Trainer(config, 91, store)
+    batches = []
+    original_collect = trainer.collect
+
+    def collect(layer, count, pretrain=False):
+        buffer, records = original_collect(layer, count, pretrain)
+        batches.append((layer, buffer.behavior_version, buffer.opponent_version, copy.deepcopy(buffer.samples)))
+        # The interval reward must contain each physical reward exactly once,
+        # with its physical-slot discount and this batch's frozen reward units.
+        for sample in buffer.samples:
+            rewards = np.asarray(sample["physical_rewards"]) * sample["reward_scale"]
+            if sample["reward_clip"] is not None:
+                rewards = np.clip(rewards, -sample["reward_clip"], sample["reward_clip"])
+            expected = sum(config["ppo"]["gamma"] ** i * reward for i, reward in enumerate(rewards))
+            assert sample["reward"] == pytest.approx(expected)
+            assert len(rewards) == sample["duration"]
+        return buffer, records
+
+    monkeypatch.setattr(trainer, "collect", collect)
+    restored = None
+    try:
+        trainer.run()
+        assert trainer.total_slots == 36
+        assert trainer.versions == {"upper": 2, "lower": 3}
+        assert [(layer, behavior, opponent) for layer, behavior, opponent, _ in batches] == [
+            ("lower", 0, 0), ("upper", 0, 1), ("lower", 1, 1),
+            ("upper", 1, 2), ("lower", 2, 2)]
+        for layer, _, _, samples in batches:
+            if layer == "upper":
+                assert [sample["duration"] for sample in samples] == [4, 1, 4]
+            assert samples[-1]["truncated"] and not samples[-1]["terminated"]
+            assert samples[-1]["next_value"] < 0  # truncated fragments retain bootstrap
+            assert all(sample["next_value"] == 0 for sample in samples if sample["terminated"])
+            assert all(sample["value"] < 0 for sample in samples)  # past negative reward-rate baseline
+        assert all(row["frozen_unchanged"] and row["parameters_changed"] for row in trainer.history)
+        assert all(row["behavior_logprob_error"] < 1e-5 for row in trainer.history)
+        assert all(row["value_target"] == "sampled_return" for row in trainer.history)
+        assert len(inspect_run(store.path)["updates"]) == 5  # independent physical/GAE/loss arithmetic
+        checkpoint = tmp_path / "finite_hpgi.pt"
+        trainer.save(checkpoint)
+        restored = Trainer.load(checkpoint)
+        assert restored.reward_normalizer.state_dict() == trainer.reward_normalizer.state_dict()
+        for layer in ("upper", "lower"):
+            for key, value in getattr(trainer.controller, layer).state_dict().items():
+                torch.testing.assert_close(value, getattr(restored.controller, layer).state_dict()[key])
+        restored.run(extra_cycles=1)
+        assert restored.total_slots == 51
+        assert restored.versions == {"upper": 3, "lower": 4}
+    finally:
+        trainer.close()
+        if restored is not None:
+            restored.close()
+        store.finish()
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
 def test_hpgi_cuda_four_workers_freezing_fresh_buffers_and_resume(config, tmp_path, monkeypatch):
     config["device"] = "cuda"

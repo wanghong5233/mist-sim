@@ -1,12 +1,12 @@
 # 测试范围
 
-test_finite_horizon_value.py手算实际采样回报、真实终止/截断/bootstrap、零时长事件、有限时域时钟与单位转换；核对actor仍使用GAE、critic目标独立前向复算、CPU/CUDA串行/批量/整批缓存及梯度一致。并行短训练覆盖尾区间、检查点重载和继续更新。正确性检查不代替长期收益判断。
+test_finite_horizon_value.py手算实际采样回报、真实终止/截断/bootstrap、零时长事件、有限时域时钟与单位转换，包括gamma非常接近1时的回报和残差梯度；核对actor仍使用GAE、critic目标独立前向复算、CPU/CUDA串行/批量/整批缓存及梯度一致。并行短训练覆盖尾区间、检查点重载和继续更新。正确性检查不代替长期收益判断。
 
 test_learning_quality.py用手算反例检查非线性时间偏差、终止处价值误差、留一episode时间基线、截断/裁剪拒用和原输入不变；公开动作诊断独立求P3成本，不相信task中现成的成本字段。这些只检查诊断语义，不作为新算法或收敛证据。
 
 test_baseline_interfaces.py覆盖其余七个学习基线的CPU/CUDA训练→评价→CSV→重放/汇总→续训；GPU路径用2worker覆盖并行采样，5槽episode检查尾区间。独立复算GAE/loss/服务分母/能耗，检查冻结组件、原行为概率、方法约束及续训权重一致。另查纯贪心无需训练、层级--set校验、单层校准不调用无用网络、进度编号、输入文件来源、minimal检查点，以及Fixed-Window投影前动作/潜变量的CPU与CUDA批量梯度。产物在系统临时目录内自动清理。
 
-test_hpgi_efficiency.py检查交替组件的重型输入诊断门控、global/phase标准化及参数更新等价、公共加速overlay、4worker/CUDA的预训练/交替/恢复、冻结层不变、行为版本刷新与旧buffer拒用；保存记录由独立GAE/loss和物理检查复算。
+test_hpgi_efficiency.py检查交替组件的重型输入诊断门控、global/phase标准化及参数更新等价、公共加速overlay、4worker/CUDA的预训练/交替/恢复、冻结层不变、行为版本刷新与旧buffer拒用；保存记录由独立GAE/loss和物理检查复算。另覆盖finite_horizon/sampled_return的CPU串行/双worker交替、非单位gamma、尾区间、截断bootstrap、奖励单位冻结及重载续训。
 
 test_sampling_efficiency.py检查采样缓存命中不重建候选、环境复用已验证剖面、输入轨迹只生成一次、缓存返回值隔离，以及宽数值尺度P3容量/KKT；还检查分组件优势标准化、单元素/常量组、配置与dry-run及独立loss复算。rollout诊断记录更新前分组件优势、时隙相关性和价值拟合；不以更新后的explained variance代替动作收益证据。CPU/CUDA等价更新同时覆盖global和phase标准化。
 

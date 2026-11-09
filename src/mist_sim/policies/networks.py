@@ -1,4 +1,5 @@
 """Autoregressive set policies with independent actor and critic encoders."""
+import math
 import numpy as np
 import torch
 from torch import nn
@@ -134,7 +135,12 @@ class SetPolicy(nn.Module):
         super().__init__()
         self.learned_rates = learned_rates
         self.value_model, self.value_horizon, self.value_gamma = value_model, horizon, gamma
-        self.discounted_horizon = horizon if gamma == 1 else (1 - gamma ** horizon) / (1 - gamma)
+        if gamma == 1:
+            self.discounted_horizon = horizon
+        elif gamma == 0:
+            self.discounted_horizon = 1.
+        else:
+            self.discounted_horizon = -math.expm1(horizon * math.log(gamma)) / (1 - gamma)
         self.register_buffer("value_scale", torch.tensor(1.))
         self.register_buffer("value_baseline", torch.tensor(0.))
         self.item_norm, self.server_norm, self.context_norm = Normalizer(ITEM_DIM), Normalizer(SERVER_DIM), Normalizer(CONTEXT_DIM)
@@ -189,8 +195,15 @@ class SetPolicy(nn.Module):
         if self.value_model == "plain":
             return residual * self.value_scale
         remaining = (context[..., 0] * self.value_horizon).round().clamp(0, self.value_horizon)
-        steps = (remaining if self.value_gamma == 1 else
-                 (1 - self.value_gamma ** remaining) / (1 - self.value_gamma))
+        if self.value_gamma == 1:
+            steps = remaining
+        elif self.value_gamma == 0:
+            steps = (remaining > 0).to(remaining.dtype)
+        else:
+            # Raising a float32 gamma close to 1 rounds the base to 1 and
+            # cancels the entire clock (and residual gradient). Keep log(gamma)
+            # in Python precision and use expm1 for the small difference.
+            steps = -torch.expm1(remaining * math.log(self.value_gamma)) / (1 - self.value_gamma)
         return self.value_scale * (self.value_baseline * steps +
                                    residual * (steps / self.discounted_horizon))
 

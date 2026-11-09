@@ -31,7 +31,7 @@ def test_sampled_returns_count_zero_duration_reward_once():
     np.testing.assert_allclose(buffer.sampled_returns(.9), [-2 - .9 * 3, -2 - .9 * 3, -3])
 
 
-@pytest.mark.parametrize("gamma", [0., .9, 1.])
+@pytest.mark.parametrize("gamma", [0., 1e-12, .9, 1 - 1e-9, 1.])
 def test_value_has_physical_clock_and_nonzero_last_reward(gamma):
     policy = SetPolicy(8, value_model="finite_horizon", horizon=4, gamma=gamma)
     policy.set_value_baseline(-2.)
@@ -49,6 +49,25 @@ def test_value_has_physical_clock_and_nonzero_last_reward(gamma):
     policy.value_scale.mul_(.1)
     policy.set_value_baseline(-.2)
     torch.testing.assert_close(policy.value_from_encoding(encoding, context), actual * .1)
+
+
+def test_near_undiscounted_clock_preserves_remaining_returns_and_gradient():
+    gamma, horizon = 1 - 1e-9, 128
+    policy = SetPolicy(8, value_model="finite_horizon", horizon=horizon, gamma=gamma)
+    policy.set_value_baseline(-2.)
+    remaining = [128, 64, 1, 0]
+    context = torch.zeros(len(remaining), 7)
+    context[:, 0] = torch.tensor(remaining) / horizon
+    encoding = torch.randn(len(remaining), 23)
+    actual = policy.value_from_encoding(encoding, context)
+    # Independent finite sum in double precision, including the final reward.
+    discounted = torch.tensor([sum(gamma ** i for i in range(n)) for n in remaining])
+    torch.testing.assert_close(actual, -2 * discounted)
+    whole = sum(gamma ** i for i in range(horizon))
+    assert policy.discounted_horizon == pytest.approx(whole, rel=1e-12)
+    for index, expected in enumerate(discounted / whole):
+        gradient, = torch.autograd.grad(actual[index], policy.value_head[-1].bias, retain_graph=True)
+        torch.testing.assert_close(gradient.squeeze(), expected)
 
 
 def finite_config(config):
