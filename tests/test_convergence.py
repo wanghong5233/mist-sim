@@ -125,3 +125,21 @@ def test_validation_retention_keeps_pairs_and_rejects_paths(config, tmp_path):
     with pytest.raises(ValueError, match="Invalid trace stage"):
         store.retain_traces("phases", ["../../escape", "cycle_001"])
     store.finish()
+
+
+@pytest.mark.parametrize("suffix", ["upper", "lower", "joint"])
+def test_phase_retention_prunes_completed_diagnostics_only(config, tmp_path, suffix):
+    config["trace_retention"] = dict(phases=2, validations=2, inputs=2)
+    store = RunStore(Path(__file__).resolve().parents[1], config, "train", 91, output_dir=tmp_path)
+    stages = [f"cycle_{index:03d}_{suffix}" for index in (2, 12, 22)]
+    for stage in stages:
+        store.write_json(f"traces/phases/{stage}/physical.json", [dict(stage=stage)])
+    store.append_result("cycles.csv", dict(stage=stages[0], reward_per_slot=-123.))
+    original_csv = (store.result_path / "cycles.csv").read_bytes()
+    store.retain_traces("phases", stages)
+    store.retain_traces("phases", stages)
+    assert {path.name for path in (store.path / "traces/phases").iterdir()} == set(stages[-2:])
+    assert (store.result_path / "cycles.csv").read_bytes() == original_csv
+    with pytest.raises(ValueError, match="Invalid trace stage"):
+        store.retain_traces("phases", ["cycle_002_joint/../../escape", *stages[-2:]])
+    store.finish()

@@ -141,7 +141,7 @@ class RunStore:
         for stage in completed[:-keep]:
             if (kind, stage) in self.trimmed_traces:
                 continue
-            if not re.fullmatch(r"initial|pretrain(?:_\d+)?|cycle_\d+(?:_upper|_lower)?", stage):
+            if not re.fullmatch(r"initial|pretrain(?:_\d+)?|cycle_\d+(?:_upper|_lower|_joint)?", stage):
                 raise ValueError("Invalid trace stage")
             paths = [root / stage] if kind == "phases" else [root / (stage + suffix + ".json") for suffix in ("", "_sampled")]
             for path in paths:

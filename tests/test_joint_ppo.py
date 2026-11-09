@@ -165,6 +165,36 @@ def test_joint_saved_audit_results_and_resume(config, tmp_path):
     assert repeat.total_slots == 21
 
 
+def test_joint_sparse_diagnostics_survive_first_joint_eviction(config, tmp_path):
+    from pathlib import Path
+    config["method"] = "joint_ppo"
+    config["horizon"] = 4
+    config["k"] = 1
+    config["training"].update(pretrain_slots=32, fast_slots=4, cycles=23, calibration_episodes=1)
+    config["validation"]["enabled"] = False
+    config["monitoring"] = dict(tensorboard=False, console=False)
+    config["runtime"]["collection_workers"] = 0
+    config["ppo"].update(epochs=1, minibatch=16)
+    config["checkpoint_policy"].update(mode="minimal", cycle_interval=250)
+    config["trace_retention"] = dict(phases=2, validations=2, inputs=2)
+    config["diagnostics"]["phase_interval"] = 10
+    store = RunStore(Path(__file__).resolve().parents[1], config, "joint-retention-test", 91, output_dir=tmp_path)
+    trainer = Trainer(config, 91, store)
+    trainer.run()
+    store.finish()
+    assert len(trainer.cycle_history) == 23
+    assert trainer.total_slots == 32 + 23 * 4
+    assert {path.name for path in (store.path / "traces/phases").iterdir()} == {"cycle_012_joint", "cycle_022_joint"}
+    with (store.result_path / "cycles.csv").open(encoding="utf-8", newline="") as stream:
+        assert len(list(csv.DictReader(stream))) == 23
+    with (store.path / "metrics.jsonl").open(encoding="utf-8") as stream:
+        assert len(stream.readlines()) == 31
+    restored = Trainer.load(store.path / "checkpoints/last.pt")
+    restored.run(extra_cycles=1)
+    assert len(restored.cycle_history) == 24
+    assert restored.total_slots == trainer.total_slots + 4
+
+
 def test_joint_schedule_and_console(config):
     from mist_sim.monitoring import ConsoleProgress
     config["method"] = "joint_ppo"
