@@ -138,12 +138,34 @@ def encode_frames(policy, frames, critic=False, cache=None, with_servers=False, 
 
 
 def values_batch(policy, samples, cache=None):
+    if hasattr(policy, "phase_policies"):
+        values = policy.value_scale.new_zeros(len(samples))
+        for phase, subpolicy in policy.phase_policies.items():
+            indices = [index for index, sample in enumerate(samples) if sample["phase"] == phase]
+            if indices:
+                values = values.index_copy(0, tensor(policy, indices, torch.long),
+                    values_batch(subpolicy, [samples[index] for index in indices], cache))
+        return values
     return policy.value_head(encode_frames(policy, [sample["frame"] for sample in samples], True, cache)).flatten() * policy.value_scale
 
 
 def replay_batch(policy, samples, with_value=True, cache=None):
     if not samples:
         raise ValueError("Empty replay batch")
+    if hasattr(policy, "phase_policies"):
+        if any(sample.get("phase") not in policy.phase_policies for sample in samples):
+            raise ValueError("Unknown joint decision phase")
+        joint, entropy, values = [policy.value_scale.new_zeros(len(samples)) for _ in range(3)]
+        for phase, subpolicy in policy.phase_policies.items():
+            indices = [index for index, sample in enumerate(samples) if sample["phase"] == phase]
+            if indices:
+                logprob, ent, value = replay_batch(subpolicy, [samples[index] for index in indices], with_value, cache)
+                owners = tensor(policy, indices, torch.long)
+                joint = joint.index_copy(0, owners, logprob)
+                entropy = entropy.index_copy(0, owners, ent)
+                if with_value:
+                    values = values.index_copy(0, owners, value)
+        return joint, entropy, values if with_value else None
     steps, owners, frames, frame_ids, seen = [], [], [], [], {}
     for owner, sample in enumerate(samples):
         for step in sample["steps"]:

@@ -5,11 +5,15 @@ import time
 from .policies.batching import replay_batch, replay_chunks, values_batch, RolloutTensors
 
 
+def parameter_group(name):
+    return "critic" if any(part.startswith("critic_") or part == "value_head" for part in name.split(".")) else "actor"
+
+
 def clip_policy_gradients(policy, limit):
     groups = {"actor": [], "critic": []}
     for name, parameter in policy.named_parameters():
         if parameter.grad is not None:
-            group = "critic" if name.startswith(("critic_", "value_head")) else "actor"
+            group = parameter_group(name)
             groups[group].append(parameter)
     result = {}
     for group, parameters in groups.items():
@@ -52,6 +56,7 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
     targets_all = torch.tensor(returns, dtype=torch.float32)
     valid_all = torch.tensor([bool(sample["steps"]) for sample in buffer.samples])
     diagnostics = []
+    phase_diagnostics = {phase: [] for phase in getattr(policy, "phase_policies", {})}
     timings = dict(forward_loss_seconds=0.0, backward_step_seconds=0.0, kl_check_seconds=0.0)
     sample_count = len(buffer.samples)
     if not sample_count:
@@ -98,27 +103,40 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
                                     "value_loss": float(value_loss), "entropy": float(entropy_loss),
                                     "joint_kl": float(kl), "clip_fraction": float(((ratio - 1).abs() > config["clip"]).float().mean()),
                                     "gradient_norm": float(gradient), **gradient_groups})
+                for phase, rows in phase_diagnostics.items():
+                    selected = [position for position, index in enumerate(indices) if buffer.samples[index]["phase"] == phase]
+                    if selected:
+                        total, actor, critic, ent, phase_ratio, _ = loss_terms(
+                            logprob[selected], old[selected], advantage[selected], values[selected],
+                            target[selected], entropy[selected], actor_valid[selected], config)
+                        rows.append(dict(batch_size=len(selected), loss=float(total), actor_loss=float(actor),
+                            value_loss=float(critic), entropy=float(ent),
+                            clip_fraction=float(((phase_ratio - 1).abs() > config["clip"]).float().mean())))
         kl_started = time.perf_counter()
         with torch.no_grad():
             updated_logprob = replay_chunks(policy, buffer.samples, config["minibatch"], input_cache)
             old_logprob = old_all
             joint_logratio = updated_logprob - old_logprob
             post_kl = float((torch.expm1(joint_logratio.double()) - joint_logratio.double()).mean())
+            phase_kl = {phase: float((torch.expm1(joint_logratio[selected].double()) -
+                        joint_logratio[selected].double()).mean()) for phase in phase_diagnostics
+                        if (selected := [index for index, sample in enumerate(buffer.samples) if sample["phase"] == phase])}
         timings["kl_check_seconds"] += time.perf_counter() - kl_started
-        if not np.isfinite(post_kl):
+        if not np.isfinite(post_kl) or any(not np.isfinite(value) for value in phase_kl.values()):
             raise FloatingPointError("Nonfinite post-update KL")
+        stop_epoch = max([post_kl] + list(phase_kl.values())) > config["target_kl"]
         if audit is not None:
             audit["epoch_checks"].append({"epoch": epoch, "post_update_joint_kl": post_kl,
-                                          "early_stop": post_kl > config["target_kl"]})
+                                          "phase_kl": phase_kl, "early_stop": stop_epoch})
         if on_epoch is not None:
             epoch_rows = diagnostics[epoch_offset:]
             weights = [row["batch_size"] for row in epoch_rows]
             summary = {key: float(np.average([row[key] for row in epoch_rows], weights=weights))
                        for key in epoch_rows[0] if key not in ("epoch", "batch_size")}
             on_epoch(dict(summary, epoch=epoch + 1, epoch_limit=config["epochs"], minibatches=len(epoch_rows),
-                          post_update_joint_kl=post_kl, early_stop=post_kl > config["target_kl"],
+                          post_update_joint_kl=post_kl, phase_kl=phase_kl, early_stop=stop_epoch,
                           seconds=time.perf_counter() - epoch_started))
-        if post_kl > config["target_kl"]:
+        if stop_epoch:
             break
     with torch.no_grad():
         final_values = torch.cat([values_batch(policy, buffer.samples[start:start + config["minibatch"]], input_cache)
@@ -136,13 +154,25 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
                   truncated=sum(sample["truncated"] for sample in buffer.samples))
     changes = {"actor": 0.0, "critic": 0.0}
     for name, parameter in policy.named_parameters():
-        group = "critic" if name.startswith(("critic_", "value_head")) else "actor"
+        group = parameter_group(name)
         changes[group] += float((parameter.detach() - initial_parameters[name]).double().square().sum())
     output["parameter_delta_l2"] = {name: value ** .5 for name, value in changes.items()}
     output["training_reward_range"] = [min(sample["reward"] for sample in buffer.samples), max(sample["reward"] for sample in buffer.samples)]
     output["training_reward_mean"] = float(np.mean([sample["reward"] for sample in buffer.samples]))
     output["epochs_completed"] = epoch + 1
-    output["epoch_stop_reason"] = "target_kl" if post_kl > config["target_kl"] else "epoch_limit"
+    output["epoch_stop_reason"] = "target_kl" if stop_epoch else "epoch_limit"
+    if phase_diagnostics:
+        output["components"] = {}
+        for phase, rows in phase_diagnostics.items():
+            component = {key: float(np.average([row[key] for row in rows], weights=[row["batch_size"] for row in rows]))
+                         for key in rows[0] if key != "batch_size"}
+            component["post_update_joint_kl"] = phase_kl[phase]
+            component["parameter_delta_l2"] = {group: sum(
+                float((parameter.detach() - initial_parameters[name]).double().square().sum())
+                for name, parameter in policy.named_parameters()
+                if name.startswith("phase_policies." + phase + ".") and parameter_group(name) == group) ** .5
+                for group in ("actor", "critic")}
+            output["components"][phase] = component
     output["return_range"] = [float(returns.min()), float(returns.max())]
     output["advantage_range"] = [float(raw_advantages.min()), float(raw_advantages.max())]
     output["normalized_advantage"] = {"mean": float(advantages.mean()), "std": float(advantages.std()),

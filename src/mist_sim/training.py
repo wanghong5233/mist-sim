@@ -73,6 +73,11 @@ class Trainer:
                                                  lr=layer_settings(config, layer)["learning_rate"],
                                                  eps=layer_settings(config, layer)["adam_epsilon"])
                            for layer in ("upper", "lower")}
+        if config["method"] == "joint_ppo":
+            from .policies.joint import JointPolicy
+            self.joint_policy = JointPolicy(self.controller)
+            self.optimizers["joint"] = torch.optim.Adam(self.joint_policy.parameters(),
+                lr=config["ppo"]["learning_rate"], eps=config["ppo"]["adam_epsilon"])
         self.versions = {"upper": 0, "lower": 0}
         self.trace_counter = 0
         self.completed_stages = []
@@ -87,6 +92,8 @@ class Trainer:
         self.deadline = None
         self.max_slots = None
         self.epoch_counts = {"upper": 0, "lower": 0}
+        if config["method"] == "joint_ppo":
+            self.epoch_counts["joint"] = 0
         self.training_episodes = 0
         self.stop_reason = None
         self.cycle_history = []
@@ -187,10 +194,11 @@ class Trainer:
 
     def collect(self, layer, count, pretrain=False):
         units = self.reward_normalizer.units()
-        previous_scale = self.value_reward_scales[layer]
-        if previous_scale is not None:
-            getattr(self.controller, layer).value_scale.mul_(units["scale"] / previous_scale)
-        self.value_reward_scales[layer] = units["scale"]
+        for component in (("upper", "lower") if layer == "joint" else (layer,)):
+            previous_scale = self.value_reward_scales[component]
+            if previous_scale is not None:
+                getattr(self.controller, component).value_scale.mul_(units["scale"] / previous_scale)
+            self.value_reward_scales[component] = units["scale"]
         if self.config.get("runtime", {}).get("collection_workers", 0):
             return self._collect_parallel(layer, count, pretrain)
         return self._collect_serial(layer, count, pretrain)
@@ -199,7 +207,7 @@ class Trainer:
         from .collection import EpisodeCollectors
         if self.collectors is None:
             self.collectors = EpisodeCollectors(self.config, self.seed, self.config["runtime"]["collection_workers"])
-        per_episode = self.config["horizon"] if layer == "lower" else math.ceil(self.config["horizon"] / self.config["window"])
+        per_episode = self.config["horizon"] if layer in ("lower", "joint") else math.ceil(self.config["horizon"] / self.config["window"])
         jobs = []
         for offset in range(0, count, per_episode):
             trace_index = self.trace_counter
@@ -214,7 +222,11 @@ class Trainer:
                 self.store.record_input_seed(self.trace_counter, trace_seed)
         outputs = self.collectors.collect(self, jobs, layer, pretrain)
         opponent = "lower" if layer == "upper" else "upper"
-        buffer = RolloutBuffer(layer, self.versions[layer], self.versions[opponent])
+        if layer == "joint":
+            from .buffers import EventRolloutBuffer
+            buffer = EventRolloutBuffer(self.versions)
+        else:
+            buffer = RolloutBuffer(layer, self.versions[layer], self.versions[opponent])
         records = []
         for samples, episode_records in outputs:
             if any(sample["behavior_version"] != buffer.behavior_version or sample["opponent_version"] != buffer.opponent_version
@@ -233,6 +245,11 @@ class Trainer:
         return buffer, records
 
     def _collect_serial(self, layer, count, pretrain=False):
+        if layer == "joint":
+            if pretrain or self.config["method"] != "joint_ppo":
+                raise ValueError("Joint event collection requires joint_ppo after pretraining")
+            from .training_joint import collect_events
+            return collect_events(self, count)
         units = self.reward_normalizer.units()
         opponent = "lower" if layer == "upper" else "upper"
         buffer = RolloutBuffer(layer, self.versions[layer], self.versions[opponent])
@@ -312,6 +329,9 @@ class Trainer:
         return buffer, records
 
     def phase(self, name, layer, count, pretrain=False):
+        if layer == "joint":
+            from .training_joint import joint_phase
+            return joint_phase(self, name, count)
         if self.phase_in_progress:
             raise RuntimeError("Recover from a completed-stage checkpoint after an interrupted phase")
         if self.max_slots is not None and self.total_slots + rollout_slots(self.config, layer, count) > self.max_slots:
@@ -392,6 +412,11 @@ class Trainer:
                        edge_completed=sum(task["on_time"] and task["action"] == "edge" for record in records for task in record["tasks"]),
                        frozen_unchanged=True, parameters_changed=parameter_hash(policy) != before, versions=dict(self.versions),
                        total_slots=self.total_slots, **diagnostics, **summarize(records))
+        return self.finish_phase(name, layer, metrics, records, units)
+
+    def finish_phase(self, name, layer, metrics, records, units):
+        rollout = metrics["rollout"]
+        detailed = metrics["detailed_trace"]
         self.completed_stages.append(name)
         self.history.append({key: value for key, value in metrics.items()
                              if key not in ("input_diagnostics", "rollout", "durations")} |
@@ -414,7 +439,7 @@ class Trainer:
                    loss=metrics["loss"],
                    activation_probability=metrics.get("activation_probability"),
                    energy=metrics["total_energy"], cost=metrics["conservative_cost"],
-                   joint_kl=metrics["post_update_joint_kl"], frozen_unchanged=True,
+                   joint_kl=metrics["post_update_joint_kl"], frozen_unchanged=metrics["frozen_unchanged"],
                    raw_reward_per_slot=sum(record["reward"] for record in records) / len(records),
                    training_reward_mean=metrics["training_reward_mean"], explained_variance=metrics["explained_variance"],
                    reward_scale=units["scale"], reward_clipped_slots=metrics["reward_clipped_slots"],
@@ -475,9 +500,10 @@ class Trainer:
             if stopping_history and stopping_history[-1].get("convergence", {}).get("stop", False):
                 self.stop_reason = "reward_stable"
                 break
-            for layer, enabled, count in (
+            phases = (("joint", True, self.config["training"]["fast_slots"]),) if self.config["method"] == "joint_ppo" else (
                 ("upper", self.controller.learn_upper, self.config["training"]["slow_intervals"]),
-                ("lower", self.controller.learn_lower, self.config["training"]["fast_slots"])):
+                ("lower", self.controller.learn_lower, self.config["training"]["fast_slots"]))
+            for layer, enabled, count in phases:
                 name = f"cycle_{cycle:03d}_{layer}"
                 if enabled and name not in self.completed_stages:
                     self.phase(name, layer, count)
@@ -504,7 +530,7 @@ class Trainer:
         return self.history
 
     def record_training_cycle(self, stage):
-        phases = [row for row in self.history if row["stage"] in (stage + "_upper", stage + "_lower")]
+        phases = [row for row in self.history if row["stage"] in (stage + "_upper", stage + "_lower", stage + "_joint")]
         slots = sum(row["physical_slots"] for row in phases)
         arrivals = sum(row["arrivals"] for row in phases)
         completed = sum(row["completed"] for row in phases)
@@ -517,9 +543,10 @@ class Trainer:
                       update_seconds=sum(phase["update_seconds"] for phase in phases),
                       phase_seconds=sum(phase["phase_seconds"] for phase in phases))
         for layer in ("upper", "lower"):
+            joint = next((phase for phase in phases if phase["layer"] == "joint"), None)
             phase = next((phase for phase in phases if phase["layer"] == layer), None)
             fields[layer + "_reward_per_slot"] = phase["raw_reward_per_slot"] if phase else None
-            fields[layer + "_loss"] = phase["loss"] if phase else None
+            fields[layer + "_loss"] = phase["loss"] if phase else joint["components"][layer]["loss"] if joint else None
             if phase:
                 row[layer + "_metrics"] = dict(conservative_cost=phase["conservative_cost"], physical_slots=phase["physical_slots"])
         self.cycle_history.append(row)
@@ -527,6 +554,12 @@ class Trainer:
             self.config.get("convergence", DEFAULT_CONVERGENCE), self.config["horizon"])
         if self.store:
             self.store.append_result("cycles.csv", dict(total_slots=self.total_slots, **fields))
+            if joint:
+                for layer, component in joint["components"].items():
+                    self.store.append_result("components.csv", dict(stage=stage, total_slots=self.total_slots,
+                        layer=layer, events=joint["event_counts"][layer],
+                        **{key: value for key, value in component.items() if key != "parameter_delta_l2"},
+                        **{key + "_parameter_delta_l2": value for key, value in component["parameter_delta_l2"].items()}))
             self.store.write_json("cycle_history.json", self.cycle_history)
         self.event("cycle_completed", **fields)
         self.record_convergence(stage, row["convergence"])

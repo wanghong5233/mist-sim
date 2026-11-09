@@ -41,3 +41,33 @@ class RolloutBuffer:
 
     def clear(self):
         self.samples.clear()
+
+
+class EventRolloutBuffer(RolloutBuffer):
+    def __init__(self, versions):
+        snapshot = tuple(versions[layer] for layer in ("upper", "lower"))
+        super().__init__("joint", snapshot, snapshot)
+
+    def append(self, sample, reward, next_value, terminated, truncated, duration=1, next_observation=None):
+        expected = {"upper": 0, "lower": 1}.get(sample.get("phase"))
+        if self.consumed or expected is None or duration != expected:
+            raise RuntimeError("Invalid joint event lifecycle/duration")
+        if sample["phase"] == "upper" and (reward != 0 or terminated or truncated):
+            raise ValueError("A server decision must lead to its scheduling event")
+        self.samples.append(dict(sample, reward=float(reward), next_value=float(next_value),
+            terminated=bool(terminated), truncated=bool(truncated), duration=duration,
+            next_observation=next_observation, behavior_version=self.behavior_version,
+            opponent_version=self.opponent_version))
+
+    def advantages(self, gamma, gae_lambda):
+        advantage = 0.0
+        values = np.zeros(len(self.samples), dtype=np.float64)
+        for index in reversed(range(len(self.samples))):
+            sample = self.samples[index]
+            delta = sample["reward"] - sample["value"]
+            if not sample["terminated"]:
+                delta += gamma ** sample["duration"] * sample["next_value"]
+            recurse = not (sample["terminated"] or sample["truncated"]) and index + 1 < len(self.samples)
+            advantage = delta + (gamma * gae_lambda) ** sample["duration"] * advantage * recurse
+            values[index] = advantage
+        return values, values + np.array([sample["value"] for sample in self.samples])

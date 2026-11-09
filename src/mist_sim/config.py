@@ -5,7 +5,7 @@ import json
 import math
 from pathlib import Path
 
-METHODS = ("hpgi", "always_on", "fixed_split", "single_timescale", "fixed_window",
+METHODS = ("hpgi", "joint_ppo", "always_on", "fixed_split", "single_timescale", "fixed_window",
            "upper_ppo_greedy", "greedy_consolidation", "nominal", "full_information")
 
 
@@ -262,6 +262,9 @@ def validate(config):
             raise ValueError("Invalid loss weight")
     if set(config.get("ppo_layers", {})) - {"upper", "lower"}:
         raise ValueError("Unknown PPO layer")
+    if config["method"] == "joint_ppo" and any(
+            layer_settings(config, layer) != config["ppo"] for layer in ("upper", "lower")):
+        raise ValueError("joint_ppo uses common ppo settings; remove conflicting ppo_layers overrides")
     if len(set(config["seeds"].values())) != len(config["seeds"]):
         raise ValueError("Training/validation/test seeds must be distinct")
     if any(type(value) is not int or value < 0 for value in config["seeds"].values()):

@@ -158,7 +158,8 @@ def check_update(samples, audit):
             total += coefficient * deltas[index]
             if samples[index]["terminated"] or samples[index]["truncated"]:
                 break
-            coefficient *= gamma ** samples[index]["duration"] * lam
+            duration = samples[index]["duration"]
+            coefficient *= (gamma * lam) ** duration if "phase" in samples[index] else gamma ** duration * lam
         targets.append(total)
     close(audit["td_errors"], deltas, "TD")
     close(audit["advantages"], targets, "forward-sum GAE")

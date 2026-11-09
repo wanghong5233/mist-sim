@@ -64,6 +64,16 @@ PPO的critic目标是**GAE lambda-return `A+V_old`**，不是完整Monte Carlo�
 
 ## 方法与配置
 
+`joint_ppo`是可切换的训练机制对照：不改变环境、状态字段、匿名边界、容量掩码或P3。`training_joint.py`按`upper`服务器事件（duration=0、即时奖励0）与`lower`物理槽事件（duration=1、完整负成本）构造同一个EventRolloutBuffer；开关读取当前请求发布前的信息，调度读取开关后发布的当前公开批次，时间仅由执行物理槽推进。每个episode的首事件是开关，随后每Q槽插入一次开关。历史不足或空请求不会删掉物理奖励/critic样本。
+
+JointPolicy包装原有两套SetPolicy作为phase条件分支，不增加可见信息或参数数量；两类actor评分仍为270→64→64→1，critic135→64→64→1。批量重放按phase分组，复用RolloutTensors与原动作前缀/掩码，再把结果放回原batch顺序；不是对整条轨迹概率相乘。一个联合Adam更新两分支，首次联合更新显式复制预训练调度Adam状态。两个actor共同裁剪、两个critic共同裁剪；标准化优势在整个事件rollout计算一次。
+
+事件TD=`r+gamma^d*V(next_phase,next_obs)−V(old_phase,obs)`；GAE递推系数=`(gamma*lambda)^d`，开关零时长事件不增加折扣或lambda衰减，价值bootstrap跨phase。终止归零、截断bootstrap且不跨重置，行为快照包含两网络版本，使用后清空。采样至更新结束冻结归一化，每个真实物理reward只更新统计一次。PPO沿用公共clip损失/GAE/优势标准化/梯度裁剪，任一分支或整体KL超过阈值终止该批epoch，不结束整个训练。common ppo配置控制联合更新，冲突的层覆盖报错。
+
+默认每iteration 1024物理槽=1024调度+256开关事件，1280事件在每epoch分20个64大小minibatch；最大5epoch，实际受KL限制。系统reward、成本、能耗与服务仅按物理记录统计一次；训练归一化reward均值按物理槽，training_event_reward_mean另列。components.csv保存组件loss/KL/参数变化，不假造两份独立系统回报。hpgi保留两个新采样批次的原机制及每组件决策步lambda语义；两方案比较的是完整训练机制，不能称只改变样本复用的一项消融。
+
+`comparison.py`提供等交互预算的两方法运行：先在HPGI公共环境校准/预训练，再显式校验配置与源码签名，复用同一初始权重/优化器/归一化/随机状态。各方法有独立运行与结果记录；按物理槽和墙钟时间比较，不按iteration编号直接等同。原有PPO工程参考仍是下方固定版本CleanRL/SB3；阶段化事件实现是本项目适配，不宣称已证明最稳或优于HPGI。
+
 所有方法共用环境、指标和PPO核心；[README](README.md)列全部方法入口。Fixed-Window输出无联合容量掩码的离散动作和学习速率，PPO联合密度含原始高斯潜变量；执行前固定投影不修改行为概率，保留投影前违约。Greedy快层比较完整P3增量成本；慢层用上一完整公开区间从全开逐台试关，仅预测总成本下降才接受，不看未来。有界枚举只有完整搜索才报告最优，离线多槽枚举也必须在Q区间内保持开关不变。preflight的物理最坏边界、可执行调度及小网格穷举分别检查单请求、联合可行性和受限动作集差距，不将其冒充HPGI训练结果。
 
 `configs/environments/`管场景，`configs/algorithms/`管采样、网络及优化，顶层JSON组合二者。overlay/--set严格校验键；`ppo_layers.upper/lower`可覆盖宽度、学习率等，gamma共用。12条validation是可改的开发样本量，不是batch或论文固定值；min_service_rate=null，选中最低验证成本不代表服务要求满足。

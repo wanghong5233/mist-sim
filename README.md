@@ -1,6 +1,6 @@
 # MIST 仿真实验工程
 
-`mist-sim/`是独立仿真工程与Git仓库根，`src/mist_sim/`是Python导入包，HPGI是提出的方法。仓库实现环境、HPGI、全部基线及训练/评价流程。
+`mist-sim/`是独立仿真工程与Git仓库根，`src/mist_sim/`是Python导入包。仓库实现环境、原稿HPGI、可切换的joint_ppo候选、全部基线及训练/评价流程；主算法选择依据实验对照。
 
 ## 仓库与隐私
 
@@ -56,6 +56,7 @@ mist-sim/
 |方法键|实际差异|
 |---|---|
 |hpgi|双层PPO、容量掩码、P3|
+|joint_ppo|同一条物理轨迹上的阶段条件联合PPO；保留配置Q槽开关和逐槽调度|
 |always_on|全开、独立训练快层|
 |fixed_split|逐模型固定合法切分，保留双层训练|
 |single_timescale|Q=1，PPO仍交替冻结|
@@ -81,6 +82,8 @@ mist-sim/
 & D:/Anaconda/envs/pytorch/python.exe scripts/validation/check_training_scenario.py --witness --exact --seed 4100017
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method hpgi --dry-run
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method hpgi --seed 4200001
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method joint_ppo --seed 4200001
+& D:/Anaconda/envs/pytorch/python.exe scripts/training/compare_mechanisms.py --config configs/conditional.json --slots 32768 --seed 4200001
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim evaluate --checkpoint logs/runs/<训练ID>/checkpoints/last.pt --seed 4400019
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim replay --checkpoint logs/runs/<训练ID>/checkpoints/last.pt --records logs/runs/<评价ID>/traces/evaluation.json
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim summarize --records logs/runs/<评价ID>/traces/evaluation.json
@@ -88,6 +91,10 @@ mist-sim/
 ```
 
 占位ID替换为实际运行路径；学习方法必须加载自己的权重。`--overlay 文件.json`和`--set ppo.learning_rate=0.0001`严格覆盖配置，未知键报错；上下层可通过ppo_layers独立配置。变更源码/配置/剖面后拒绝无说明续训。
+
+`joint_ppo`采用公共ppo设置（不接受冲突的ppo_layers覆盖）：一个iteration只采样fast_slots个物理槽，两个组件共同更新；slow_intervals不控制该方法的采样预算。默认1024槽对应1280个事件transition，最多5epoch、每小批64个事件。hpgi仍分别采样两个1024槽。比较脚本先共同校准/预训练一次，再从相同权重、Adam状态、归一化和随机状态出发；--slots指每种方法预训练之后的物理交互预算，须整除两者iteration大小，32768对应HPGI16轮和joint_ppo32轮，不是收敛轮数。8worker取自conditional配置。默认没有独立评价，只有显式--evaluation-trajectories N才在每种方法结束后各做一次共同开发输入评价，不逐轮额外采样。
+
+共同预训练权重只在HPGI运行的checkpoints/common_pretrain.pt保存一份，两个manifest引用同一哈希，续训仍使用各自完整检查点。结果保留各自cycles.csv、iterations.csv和comparison.csv；joint_ppo额外components.csv记录两组件loss/KL/参数变化，系统reward不拆成两个回报。训练reward按实际物理槽平均；事件reward均值另记training_event_reward_mean，不能用事件数稀释系统reward。比较图同时提供物理交互量与耗时横轴。
 
 场景检查命令不更新网络：先计算单请求可行上界，--witness构造并重放完整调度，--exact穷举预先定义的两服务器小网格及所有合法固定切分。默认仅打印，搜索不完整会返回失败且不报告最优差距。它检查“存在可服务和改善成本的选择”，不保证HPGI优于全部基线。当前场景期限[0.8,1.0]秒、每请求10MHz/每AP40MHz；推导与条件假设见data/SCENARIO.md。状态结构已变更，旧210维评分网络的检查点不能续训为当前270维网络。
 

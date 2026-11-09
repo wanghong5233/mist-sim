@@ -15,6 +15,7 @@ class ConsoleProgress:
         self.pretrain_total = 0
         self.iteration_total = 0
         self.steps = 3
+        self.joint = False
 
     def close(self):
         if self.bar is not None:
@@ -43,7 +44,8 @@ class ConsoleProgress:
                 if cycle != self.cycle:
                     self.cycle, self.started, self.losses = cycle, time.perf_counter(), {}
                     self.write(f"\nIteration {cycle}/{self.iteration_total or '?'}")
-                step, network = (1, "服务器开关网络") if stage.endswith("upper") else (2, "任务调度网络")
+                step, network = ((1, "联合事件PPO") if stage.endswith("joint") else
+                                 ((1, "服务器开关网络") if stage.endswith("upper") else (2, "任务调度网络")))
                 self.label = f"Iteration {cycle} [{step}/{self.steps}] {network}"
             else:
                 number = int(stage.split('_')[1]) + 1 if stage.startswith("pretrain_") else self.pretrain_total
@@ -66,7 +68,8 @@ class ConsoleProgress:
                        f" | 平均reward/slot={fields.get('raw_reward_per_slot', 0):.6g}"
                        f" | 采样={fields['collection_seconds']:.2f}s | PPO={fields['update_seconds']:.2f}s" + probability)
         elif event == "validation_started":
-            label = f"Iteration {int(stage.split('_')[1]) + 1} [3/3]" if stage.startswith("cycle_") else stage
+            label = (f"Iteration {int(stage.split('_')[1]) + 1} [{self.steps}/{self.steps}]"
+                     if stage.startswith("cycle_") else stage)
             self.label = label + " / 联合评价"
             self.write(f"{label} 联合策略评价中（不更新参数）")
         elif event == "validation_progress":
@@ -77,7 +80,7 @@ class ConsoleProgress:
             service = fields["service"]
             service_text = "N/A" if service is None else f"{service:.2%}"
             losses = " | ".join(f"{name}平均loss={self.losses[layer]:.5g}" for layer, name in
-                                (("upper", "服务器"), ("lower", "调度")) if self.losses.get(layer) is not None)
+                                (("upper", "服务器"), ("lower", "调度"), ("joint", "联合")) if self.losses.get(layer) is not None)
             timing = f" | 本轮耗时={time.perf_counter() - self.started:.2f}s" if stage.startswith("cycle_") and self.started is not None else ""
             sampled = (f" | 采样平均reward/slot={fields['sampled_reward_per_slot']:.6g}"
                        f" | 采样成本/时隙={fields['sampled_cost_per_slot']:.6g}"
@@ -90,6 +93,9 @@ class ConsoleProgress:
             self.pretrain_total = schedule.get("pretrain_rollouts", 0)
             self.iteration_total = schedule.get("cycles", 0)
             self.steps = 3 if schedule.get("validation_enabled", True) else 2
+            self.joint = schedule.get("method") == "joint_ppo"
+            if self.joint:
+                self.steps -= 1
             self.write(f"训练启动：准备阶段（校准、预训练 {self.pretrain_total} 次） → Iteration 1～{self.iteration_total}")
         elif event == "cycle_completed":
             self.write(f"Iteration {fields['cycle_index']} 完成 | 采样平均reward/slot={fields['reward_per_slot']:.6g}"

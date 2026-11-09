@@ -57,7 +57,7 @@ class EpisodeCollectors:
                 for future in finished:
                     samples, records = future.result()
                     outputs[futures[future]] = samples, records
-                    samples_done += len(samples)
+                    samples_done += len(records) if layer == "joint" else len(samples)
                     slots_done += len(records)
                     trainer.event("collect", layer=layer, samples=samples_done,
                                   target_samples=sum(count for _, count in jobs), collected_slots=slots_done)
