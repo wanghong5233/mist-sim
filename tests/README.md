@@ -1,5 +1,7 @@
 # 测试范围
 
+test_parallel_collection.py检查同种子串行episode参考与并行buffer/动作一致、GAE边界、尾段bootstrap、行为概率、恢复及短交替更新的快照刷新/冻结层。它不与旧串行全局随机流强行比较。benchmark_collection.py仅测真实训练采样时间和动作/物理结果哈希，不更新网络，不跑独立评价，不保存结果目录。
+
 测试先覆盖 V6 的可手算关系：逐时隙就绪与唤醒、期限最低速率、资源守恒、P3 边界和本地/边缘候选掩码。训练前必须通过这些测试；它们不替代正式实验。
 
 运行：python -m pytest tests -q。test_physics.py覆盖物理、匿名、资源与有界搜索；test_learning.py覆盖联合概率、掩码、GAE、冻结、归一化、尾区间和完整恢复。

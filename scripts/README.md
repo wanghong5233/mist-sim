@@ -4,6 +4,7 @@
 
 |目录|入口|用途|
 |---|---|---|
+|validation/|benchmark_collection.py --checkpoint 路径|同配置同策略比较1/8worker训练采样，默认8条完整轨迹；只打印耗时/哈希，无优化更新、无独立评价、无持久输出|
 |data/|profile_models.py|官方模型及输入准备、串行离线测量|
 |data/|export_profiles.py --verify-saved|导出/复算已保存剖面|
 |data/|check_inputs.py|输入、物理和重放检查；默认临时运行|

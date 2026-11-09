@@ -25,6 +25,7 @@ def describe_schedule(config, extra_cycles=0):
     fast = training["fast_slots"] if lower else 0
     slow = rollout_slots(config, "upper", training["slow_intervals"]) if upper else 0
     return {"method": config["method"], "episode_slots": config["horizon"], "control_window": config["window"],
+            "collection_workers": config.get("runtime", {}).get("collection_workers", 0),
             "pretrain_slots": pretrain, "pretrain_rollouts": math.ceil(pretrain / training["fast_slots"]),
             "cycles": cycles, "fast_transitions_per_rollout": fast,
             "slow_transitions_per_rollout": training["slow_intervals"] if upper else 0,

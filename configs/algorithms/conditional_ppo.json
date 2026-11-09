@@ -1,5 +1,5 @@
 {
-  "runtime": {"torch_threads": 1},
+  "runtime": {"torch_threads": 1, "collection_workers": 8},
   "method": "hpgi", "information": "robust", "window": 4,
   "capacity_mask": true, "learned_rates": false,
   "fixed_split": {"resnet50": 3, "resnet152": 3, "vit_b_32": 7},

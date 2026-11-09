@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import math
 import random
 import time
 from pathlib import Path
@@ -89,12 +90,21 @@ class Trainer:
         self.training_episodes = 0
         self.stop_reason = None
         self.cycle_history = []
+        self.collectors = None
+        self.collection_stop = None
+
+    def close(self):
+        if self.collectors is not None:
+            self.collectors.close()
+            self.collectors = None
 
     @property
     def minimal_checkpoints(self):
         return self.config.get("checkpoint_policy", {}).get("mode", "full") == "minimal"
 
     def check_budget(self):
+        if self.collection_stop is not None and self.collection_stop.is_set():
+            raise TrainingLimit("collection_cancelled")
         if self.deadline is not None and time.perf_counter() >= self.deadline:
             raise TrainingLimit("wall_time_limit")
 
@@ -181,6 +191,49 @@ class Trainer:
         if previous_scale is not None:
             getattr(self.controller, layer).value_scale.mul_(units["scale"] / previous_scale)
         self.value_reward_scales[layer] = units["scale"]
+        if self.config.get("runtime", {}).get("collection_workers", 0):
+            return self._collect_parallel(layer, count, pretrain)
+        return self._collect_serial(layer, count, pretrain)
+
+    def _collect_parallel(self, layer, count, pretrain):
+        from .collection import EpisodeCollectors
+        if self.collectors is None:
+            self.collectors = EpisodeCollectors(self.config, self.seed, self.config["runtime"]["collection_workers"])
+        per_episode = self.config["horizon"] if layer == "lower" else math.ceil(self.config["horizon"] / self.config["window"])
+        jobs = []
+        for offset in range(0, count, per_episode):
+            trace_index = self.trace_counter
+            trace_seed = self.seed + 10000 * trace_index
+            if trace_seed in self.validation_seeds() or trace_seed == self.config["seeds"]["test"]:
+                raise ValueError("Training substream collides with validation/test seed")
+            self.trace_counter += 1
+            jobs.append((trace_index, min(per_episode, count - offset)))
+            if self.store:
+                self.store.write_json(f"traces/inputs/input_{self.trace_counter:05d}.json",
+                                      dict(seed=trace_seed, trace=generate_trace(self.config, trace_seed)))
+                self.store.record_input_seed(self.trace_counter, trace_seed)
+        outputs = self.collectors.collect(self, jobs, layer, pretrain)
+        opponent = "lower" if layer == "upper" else "upper"
+        buffer = RolloutBuffer(layer, self.versions[layer], self.versions[opponent])
+        records = []
+        for samples, episode_records in outputs:
+            if any(sample["behavior_version"] != buffer.behavior_version or sample["opponent_version"] != buffer.opponent_version
+                   for sample in samples):
+                raise RuntimeError("Collector returned stale policy versions")
+            buffer.samples.extend(samples)
+            records.extend(episode_records)
+            self.total_slots += len(episode_records)
+            if samples[-1]["terminated"]:
+                self.training_episodes += 1
+                metrics = summarize(episode_records)
+                self.event("episode_completed", layer=layer, episode_id=samples[-1]["episode_id"],
+                           episode_count=self.training_episodes, length=len(episode_records),
+                           raw_return=sum(record["reward"] for record in episode_records),
+                           energy=metrics["total_energy"], on_time_rate=metrics["on_time_rate"])
+        return buffer, records
+
+    def _collect_serial(self, layer, count, pretrain=False):
+        units = self.reward_normalizer.units()
         opponent = "lower" if layer == "upper" else "upper"
         buffer = RolloutBuffer(layer, self.versions[layer], self.versions[opponent])
         records = []
@@ -369,6 +422,12 @@ class Trainer:
         return metrics
 
     def run(self, extra_cycles=0, max_seconds=None, max_slots=None):
+        try:
+            return self._run(extra_cycles, max_seconds, max_slots)
+        finally:
+            self.close()
+
+    def _run(self, extra_cycles=0, max_seconds=None, max_slots=None):
         stopping = self.config.get("stopping", {})
         max_seconds = max_seconds if max_seconds is not None else stopping.get("max_seconds")
         max_slots = max_slots if max_slots is not None else stopping.get("max_slots")
