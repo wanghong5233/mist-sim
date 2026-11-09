@@ -75,6 +75,7 @@ def run_pair(config, seed, slots, root, output_dir=None, evaluation_trajectories
         first.close()
         raise
     common_seconds = time.perf_counter() - common_started
+    first.close()
     provenance = dict(checkpoint=str(common_path), sha256=digest_file(common_path),
                       physical_slots=first.total_slots, seconds=common_seconds)
     reports = []
@@ -86,7 +87,8 @@ def run_pair(config, seed, slots, root, output_dir=None, evaluation_trajectories
             trainer = Trainer(configurations[method], seed, store)
             initialize_common(trainer, payload)
         store.manifest["comparison"] = dict(common_initialization=provenance, requested_post_pretrain_slots=slots,
-            methods=list(budgets), development_evaluation_trajectories=evaluation_trajectories)
+            methods=list(budgets), development_evaluation_trajectories=evaluation_trajectories,
+            collector_start="cold")
         store.write_json("manifest.json", store.manifest)
         started = time.perf_counter()
         try:
@@ -97,6 +99,15 @@ def run_pair(config, seed, slots, root, output_dir=None, evaluation_trajectories
             report = dict(method=method, run_id=store.path.name, seed=seed,
                 results=str(store.result_path), common_checkpoint_sha256=provenance["sha256"],
                 post_pretrain_slots=actual_slots, training_seconds=training_seconds,
+                training_transitions=sum(row["samples"] for row in phases),
+                sample_presentations=sum(row["samples"] * row["epochs_completed"] for row in phases),
+                optimizer_steps=sum(row["optimizer_steps"] for row in phases),
+                atomic_decisions=sum(row["rollout"]["decisions"] for row in phases),
+                collection_seconds=sum(row["collection_seconds"] for row in phases),
+                update_seconds=sum(row["update_seconds"] for row in phases),
+                probability_check_seconds=sum(row["probability_check_seconds"] for row in phases),
+                trace_write_seconds=sum(row["trace_write_seconds"] for row in phases),
+                collector_start="cold",
                 iterations=len(trainer.cycle_history), stop_reason=trainer.stop_reason,
                 training_reward_per_slot=sum(row["raw_reward_sum"] for row in phases) / actual_slots,
                 training_service=sum(row["completed"] for row in phases) / max(1, sum(row["arrivals"] for row in phases)),

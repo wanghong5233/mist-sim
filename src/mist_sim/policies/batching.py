@@ -139,6 +139,8 @@ def encode_frames(policy, frames, critic=False, cache=None, with_servers=False, 
 
 def values_batch(policy, samples, cache=None):
     if hasattr(policy, "phase_policies"):
+        if any(sample.get("phase") not in policy.phase_policies for sample in samples):
+            raise ValueError("Unknown joint decision phase")
         values = policy.value_scale.new_zeros(len(samples))
         for phase, subpolicy in policy.phase_policies.items():
             indices = [index for index, sample in enumerate(samples) if sample["phase"] == phase]

@@ -102,7 +102,7 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
                 diagnostics.append({"epoch": epoch, "batch_size": len(indices), "loss": float(loss), "actor_loss": float(actor_loss),
                                     "value_loss": float(value_loss), "entropy": float(entropy_loss),
                                     "joint_kl": float(kl), "clip_fraction": float(((ratio - 1).abs() > config["clip"]).float().mean()),
-                                    "gradient_norm": float(gradient), **gradient_groups})
+                                    "gradient_norm": float(gradient), "gradient_after_clip": clipped_gradient, **gradient_groups})
                 for phase, rows in phase_diagnostics.items():
                     selected = [position for position, index in enumerate(indices) if buffer.samples[index]["phase"] == phase]
                     if selected:
@@ -147,8 +147,7 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
               for key in diagnostics[0] if key not in ("epoch", "batch_size")}
     output.update(samples=sample_count, optimizer_steps=len(diagnostics), explained_variance=explained,
                   update_timings=timings,
-                  post_update_joint_kl=post_kl, gradient_after_clip_max=max(
-                      [item["gradient_after_clip"] for item in audit["minibatches"]]) if audit else clipped_gradient,
+                  post_update_joint_kl=post_kl, gradient_after_clip_max=max(item["gradient_after_clip"] for item in diagnostics),
                   durations=[sample["duration"] for sample in buffer.samples],
                   terminated=sum(sample["terminated"] for sample in buffer.samples),
                   truncated=sum(sample["truncated"] for sample in buffer.samples))

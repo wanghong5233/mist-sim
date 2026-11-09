@@ -94,6 +94,8 @@ mist-sim/
 
 `joint_ppo`采用公共ppo设置（不接受冲突的ppo_layers覆盖）：一个iteration只采样fast_slots个物理槽，两个组件共同更新；slow_intervals不控制该方法的采样预算。默认1024槽对应1280个事件transition，最多5epoch、每小批64个事件。hpgi仍分别采样两个1024槽。比较脚本先共同校准/预训练一次，再从相同权重、Adam状态、归一化和随机状态出发；--slots指每种方法预训练之后的物理交互预算，须整除两者iteration大小，32768对应HPGI16轮和joint_ppo32轮，不是收敛轮数。8worker取自conditional配置。默认没有独立评价，只有显式--evaluation-trajectories N才在每种方法结束后各做一次共同开发输入评价，不逐轮额外采样。
 
+等物理槽不等于等优化计算量：默认每2048槽，HPGI最多100个Adam步骤，joint_ppo为200个。comparison.csv并列实际训练transition、样本使用次数、优化步数与分项耗时；两者统一冷启动采样池。不能由“只采样一次”推断联合方法整体更快，详细口径见IMPLEMENTATION。
+
 共同预训练权重只在HPGI运行的checkpoints/common_pretrain.pt保存一份，两个manifest引用同一哈希，续训仍使用各自完整检查点。结果保留各自cycles.csv、iterations.csv和comparison.csv；joint_ppo额外components.csv记录两组件loss/KL/参数变化，系统reward不拆成两个回报。训练reward按实际物理槽平均；事件reward均值另记training_event_reward_mean，不能用事件数稀释系统reward。比较图同时提供物理交互量与耗时横轴。
 
 场景检查命令不更新网络：先计算单请求可行上界，--witness构造并重放完整调度，--exact穷举预先定义的两服务器小网格及所有合法固定切分。默认仅打印，搜索不完整会返回失败且不报告最优差距。它检查“存在可服务和改善成本的选择”，不保证HPGI优于全部基线。当前场景期限[0.8,1.0]秒、每请求10MHz/每AP40MHz；推导与条件假设见data/SCENARIO.md。状态结构已变更，旧210维评分网络的检查点不能续训为当前270维网络。

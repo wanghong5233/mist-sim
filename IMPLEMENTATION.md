@@ -72,7 +72,9 @@ JointPolicy包装原有两套SetPolicy作为phase条件分支，不增加可见�
 
 默认每iteration 1024物理槽=1024调度+256开关事件，1280事件在每epoch分20个64大小minibatch；最大5epoch，实际受KL限制。系统reward、成本、能耗与服务仅按物理记录统计一次；训练归一化reward均值按物理槽，training_event_reward_mean另列。components.csv保存组件loss/KL/参数变化，不假造两份独立系统回报。hpgi保留两个新采样批次的原机制及每组件决策步lambda语义；两方案比较的是完整训练机制，不能称只改变样本复用的一项消融。
 
-`comparison.py`提供等交互预算的两方法运行：先在HPGI公共环境校准/预训练，再显式校验配置与源码签名，复用同一初始权重/优化器/归一化/随机状态。各方法有独立运行与结果记录；按物理槽和墙钟时间比较，不按iteration编号直接等同。原有PPO工程参考仍是下方固定版本CleanRL/SB3；阶段化事件实现是本项目适配，不宣称已证明最稳或优于HPGI。
+`comparison.py`提供等交互预算的两方法运行：先在HPGI公共环境校准/预训练，再显式校验配置与源码签名，复用同一初始权重/优化器/归一化/随机状态。公共预训练后关闭进程池，两方法均从冷进程池开始计时。comparison.csv同时记录物理槽、训练transition、所有epoch样本使用总次数、Adam步数、原子决定数与采样/PPO/概率复核/轨迹写入耗时；sample_presentations按实际完成epoch计数，不包括KL复核前向。
+
+相同2048物理槽下，HPGI使用256个开关+1024个调度训练样本，最多5epoch共100个Adam步骤；joint_ppo使用512个开关+2048个调度训练样本，共200步。因此等交互预算不等于等优化计算量，减少重采样不保证总耗时更短；需分别观察按物理槽和墙钟时间的学习曲线。各方法独立保存记录，不按iteration编号直接等同。原有PPO工程参考仍是下方固定版本CleanRL/SB3；阶段化事件实现是本项目适配，不宣称已证明最稳或优于HPGI。
 
 所有方法共用环境、指标和PPO核心；[README](README.md)列全部方法入口。Fixed-Window输出无联合容量掩码的离散动作和学习速率，PPO联合密度含原始高斯潜变量；执行前固定投影不修改行为概率，保留投影前违约。Greedy快层比较完整P3增量成本；慢层用上一完整公开区间从全开逐台试关，仅预测总成本下降才接受，不看未来。有界枚举只有完整搜索才报告最优，离线多槽枚举也必须在Q区间内保持开关不变。preflight的物理最坏边界、可执行调度及小网格穷举分别检查单请求、联合可行性和受限动作集差距，不将其冒充HPGI训练结果。
 
@@ -94,7 +96,7 @@ behavior采用`mist.behavior.shared.v1`共享frame/特征组格式，避免重�
 
 PPO更新通过`policies/batching.py`执行小批张量前向/反向：按候选→请求→状态分段池化、按指派绑定服务器，随后批量计算掩码概率并沿原前缀汇总。空任务只更新critic，Fixed-Window连续速率密度保留。逐样本replay作独立测试参照。采样保留物理时序与资源前缀依赖，单次no_grad动作内复用不变的请求编码，跨参数更新不缓存激活。上层前缀共享只读请求/候选，改变服务器行；校准统计按共享输入去重，避免多前缀重复加权。
 
-每个epoch的loss/熵/clip等按实际小批样本数加权，尾批不与满批等权；KL另在epoch后对全部rollout分块批量重算，不计算无用critic。更新前概率复核也走同一批量路径。`metrics.jsonl`单列diagnostics_seconds、trace_write_seconds、probability_check_seconds及update_timings（前向/loss、反向/step、KL），不把阶段剩余时间冒称磁盘写入。轨迹JSON不缩进，完整数值和独立复算接口保持不变。
+每个epoch的loss/熵/clip等按实际小批样本数加权，尾批不与满批等权；gradient_after_clip_max始终取本次更新全部小批的最大联合梯度范数，不依赖详细审计开关。actor/critic分别裁剪，联合范数上界为sqrt(2)×max_grad_norm。KL另在epoch后对全部rollout分块批量重算，不计算无用critic。更新前概率复核也走同一批量路径。`metrics.jsonl`单列diagnostics_seconds、trace_write_seconds、probability_check_seconds及update_timings（前向/loss、反向/step、KL），不把阶段剩余时间冒称磁盘写入。轨迹JSON不缩进，完整数值和独立复算接口保持不变。
 
 `runtime.torch_threads`可配置CPU算子线程数，默认1；小网络串行采样与批量更新对线程数的收益不同，需按整条链路实测，不能用线程数推断并行效率。`scripts/validation/benchmark_batching.py`默认使用合成变长输入，也可传--behavior读取已有轨迹，只测量不写结果或更新权重。
 

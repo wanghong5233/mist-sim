@@ -196,5 +196,9 @@ def test_paired_methods_share_initialization_and_budget(config, tmp_path):
     assert [report["method"] for report in reports] == ["hpgi", "joint_ppo"]
     assert [report["post_pretrain_slots"] for report in reports] == [8, 8]
     assert [report["iterations"] for report in reports] == [1, 2]
+    assert [report["training_transitions"] for report in reports] == [5, 10]
+    assert [report["sample_presentations"] for report in reports] == [5, 10]
+    assert [report["optimizer_steps"] for report in reports] == [2, 4]
+    assert all(report["collector_start"] == "cold" for report in reports)
     assert reports[0]["common_checkpoint_sha256"] == reports[1]["common_checkpoint_sha256"]
     assert all(np.isfinite(report["final_development_reward_per_slot"]) for report in reports)
