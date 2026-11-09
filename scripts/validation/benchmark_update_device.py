@@ -15,6 +15,7 @@ import torch
 from mist_sim.policies.batching import replay_batch, RolloutTensors
 from mist_sim.ppo import loss_terms, clip_policy_gradients
 from mist_sim.training import Trainer
+from mist_sim.ppo import update
 
 
 def synchronize(device):
@@ -86,6 +87,8 @@ def main():
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--sizes", type=int, nargs="+", default=[32, 64])
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--full-rollout", action="store_true", help="Compare full updates: CPU64 and CUDA64/128/256")
+    parser.add_argument("--snapshot-only", action="store_true", help="Import a completed older snapshot for isolated profiling, never resume a run")
     args = parser.parse_args()
     if args.repeats < 1 or any(size < 2 or size > 64 for size in args.sizes):
         parser.error("Use 2..64 events and at least one repeat")
@@ -98,9 +101,27 @@ def main():
     print(json.dumps(dict(checkpoint=str(args.checkpoint.resolve()), checkpoint_sha256=hashlib.sha256(payload).hexdigest(),
         gpu=torch.cuda.get_device_name(), torch=torch.__version__, threads=1)), flush=True)
     del payload
-    trainer = Trainer.load(args.checkpoint)
+    if args.snapshot_only:
+        saved = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+        if not saved.get("resumable"):
+            raise ValueError("Only completed snapshots may initialize this probe")
+        trainer = Trainer(saved["config"], saved["seed"])
+        trainer.controller.load_state_dict(saved["controller"])
+        trainer.reward_normalizer.load_state_dict(saved["reward_normalizer"])
+        trainer.value_reward_scales = saved["value_reward_scales"]
+        trainer.trace_counter = saved["trace_counter"]
+        for phase, optimizer in trainer.optimizers.items():
+            optimizer.load_state_dict(saved["optimizers"][phase])
+        print(json.dumps(dict(snapshot_only=True, source_signature=saved["implementation_signature"],
+                              completed_stages=saved["completed_stages"])), flush=True)
+        del saved
+    else:
+        trainer = Trainer.load(args.checkpoint)
     if trainer.config["method"] != "joint_ppo":
         raise ValueError("This probe expects a joint_ppo checkpoint")
+    if args.full_rollout:
+        full_rollout(trainer)
+        return
     trainer.config["runtime"]["collection_workers"] = 0
     started = time.perf_counter()
     buffer, _ = trainer.collect("joint", max(args.sizes))
@@ -129,6 +150,44 @@ def main():
             gradient_max_abs_error=max(float(np.max(np.abs(expected - gpu["gradients"][name])))
                 for name, expected in cpu["gradients"].items()))), flush=True)
     trainer.close()
+
+
+def full_rollout(trainer):
+    started = time.perf_counter()
+    buffer, records = trainer.collect("joint", trainer.config["training"]["fast_slots"])
+    sampling_seconds = time.perf_counter() - started
+    trainer.close()
+    print(json.dumps(dict(physical_slots=len(records), events=len(buffer.samples), sampling_seconds=sampling_seconds)), flush=True)
+    if not trainer.optimizers["joint"].state:
+        for parameter, state in trainer.optimizers["lower"].state.items():
+            trainer.optimizers["joint"].state[parameter] = copy.deepcopy(state)
+    results = []
+    for device, batch in (("cpu", 64), ("cuda", 64), ("cuda", 128), ("cuda", 256)):
+        policy = copy.deepcopy(trainer.joint_policy)
+        optimizer = torch.optim.Adam(policy.parameters(), lr=trainer.config["ppo"]["learning_rate"],
+                                     eps=trainer.config["ppo"]["adam_epsilon"])
+        optimizer.load_state_dict(copy.deepcopy(trainer.optimizers["joint"].state_dict()))
+        replay_buffer = copy.copy(buffer)
+        replay_buffer.samples = list(buffer.samples)
+        settings = dict(trainer.config["ppo"], minibatch=batch, target_kl=1e6)
+        torch.manual_seed(71)
+        started = time.perf_counter()
+        metrics = update(policy, optimizer, replay_buffer, settings, buffer.behavior_version, buffer.opponent_version,
+                         device=device)
+        elapsed = time.perf_counter() - started
+        report = dict(device=device, minibatch=batch, physical_slots=len(records), events=len(buffer.samples),
+            forced_full_epochs=True, epochs=metrics["epochs_completed"], optimizer_steps=metrics["optimizer_steps"],
+            full_update_seconds=elapsed, sampling_seconds=sampling_seconds, combined_seconds=elapsed + sampling_seconds,
+            input_pack_transfer_seconds=metrics["input_pack_transfer_seconds"],
+            rollout_tensor_bytes=metrics["rollout_tensor_bytes"], rollout_tensor_transfers=metrics["rollout_tensor_transfers"],
+            device_metrics=metrics["device_metrics"], loss=metrics["loss"], post_update_joint_kl=metrics["post_update_joint_kl"])
+        print(json.dumps(report), flush=True)
+        results.append(report)
+        del policy, optimizer, replay_buffer
+        gc.collect()
+        torch.cuda.empty_cache()
+    print(json.dumps(dict(update_speedups={str(row["minibatch"]): results[0]["full_update_seconds"] / row["full_update_seconds"]
+                                          for row in results[1:]})), flush=True)
 
 
 if __name__ == "__main__":

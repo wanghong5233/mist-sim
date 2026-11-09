@@ -1,0 +1,4 @@
+{
+  "device": "cuda",
+  "ppo": {"minibatch": 128}
+}

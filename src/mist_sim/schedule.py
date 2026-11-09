@@ -27,6 +27,7 @@ def describe_schedule(config, extra_cycles=0):
     slow = rollout_slots(config, "upper", training["slow_intervals"]) if upper else 0
     joint_upper = event_count(config, fast) - fast if joint else 0
     return {"method": config["method"], "episode_slots": config["horizon"], "control_window": config["window"],
+            "sampling_device": "cpu", "update_device": config["device"],
             "collection_workers": config.get("runtime", {}).get("collection_workers", 0),
             "pretrain_slots": pretrain, "pretrain_rollouts": math.ceil(pretrain / training["fast_slots"]),
             "cycles": cycles, "fast_transitions_per_rollout": fast,

@@ -97,6 +97,8 @@ class ConsoleProgress:
             if self.joint:
                 self.steps -= 1
             self.write(f"训练启动：准备阶段（校准、预训练 {self.pretrain_total} 次） → Iteration 1～{self.iteration_total}")
+            self.write(f"采样设备=cpu | PPO更新设备={schedule.get('update_device', 'cpu')}"
+                       f" | 采样进程={schedule.get('collection_workers', 0)}")
         elif event == "cycle_completed":
             self.write(f"Iteration {fields['cycle_index']} 完成 | 采样平均reward/slot={fields['reward_per_slot']:.6g}"
                        f" | 服务器loss={fields['upper_loss']} | 调度loss={fields['lower_loss']}"

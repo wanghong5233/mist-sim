@@ -59,6 +59,8 @@ def state_hash(policy):
 class Trainer:
     def __init__(self, config, seed, store=None):
         validate(config)
+        if config["device"] == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError("CUDA update requested but CUDA is unavailable")
         if type(seed) is not int or seed < 0 or seed in (config["seeds"]["validation"], config["seeds"]["test"]):
             raise ValueError("Training seed must differ from validation/test seeds")
         self.config, self.seed, self.store = copy.deepcopy(config), seed, store
@@ -381,7 +383,8 @@ class Trainer:
                 self.epoch_counts[layer] += 1
                 self.event("ppo_epoch", stage=name, layer=layer, layer_epoch=self.epoch_counts[layer], **summary)
             diagnostics = update(policy, self.optimizers[layer], buffer, layer_settings(self.config, layer),
-                                 self.versions[layer], self.versions[opponent], audit, self.check_budget, report_epoch)
+                                 self.versions[layer], self.versions[opponent], audit, self.check_budget, report_epoch,
+                                 device=self.config["device"])
             updated = time.perf_counter()
             if self.store and detailed:
                 self.store.write_json(f"traces/phases/{name}/update.json", audit)
@@ -677,7 +680,7 @@ class Trainer:
         temporary.replace(path)
 
     @classmethod
-    def load(cls, path, config=None, store=None):
+    def load(cls, path, config=None, store=None, device=None):
         payload = torch.load(path, map_location="cpu", weights_only=False)
         if payload["schema"] != CHECKPOINT_SCHEMA:
             raise ValueError("Incompatible checkpoint schema")
@@ -685,8 +688,12 @@ class Trainer:
             raise ValueError("Checkpoint implementation changed; use its recorded source version")
         if not payload.get("resumable", False):
             raise ValueError("Interrupted phase snapshot is diagnostic only; load last completed or initial checkpoint")
-        expected = config if config is not None else payload["config"]
-        if signature(expected) != payload["signature"]:
+        expected = copy.deepcopy(config if config is not None else payload["config"])
+        if device is not None:
+            expected["device"] = device
+        comparable = copy.deepcopy(expected)
+        comparable["device"] = payload["config"]["device"]
+        if signature(comparable) != payload["signature"]:
             raise ValueError("Checkpoint/config/input mismatch")
         trainer = cls(expected, payload["seed"], store)
         trainer.controller.load_state_dict(payload["controller"])

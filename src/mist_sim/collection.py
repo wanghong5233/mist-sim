@@ -13,6 +13,7 @@ def initialize_collector(config, seed, stop):
     from .training import Trainer
     worker_config = copy.deepcopy(config)
     worker_config["runtime"]["torch_threads"] = 1
+    worker_config["device"] = "cpu"
     collector = Trainer(worker_config, seed)
     collector.collection_stop = stop
 

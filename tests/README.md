@@ -1,5 +1,7 @@
 # 测试范围
 
+test_update_devices.py覆盖设备校验、CPU worker边界、整批缓存共享存储、CPU/CUDA完整更新数值一致、GPU Adam及回传、异常恢复CPU、跨设备检查点及预训练/联合更新/续训。无CUDA时仅GPU测试显式skip；不把CPU测试通过当CUDA已验收。
+
 test_joint_ppo.py覆盖零时长开关事件与跨phase GAE、物理奖励只计一次、终止/截断、原概率/掩码、两组件参数变化、1/2worker一致性、检查点恢复、原始CSV与独立PPO复算、共同预训练及对照计算量。test_joint_chain.py额外比较混合事件批量/逐样本前向、裁剪loss及每个参数梯度，检查非法动作零梯度、重建物理轨迹/资源前缀、当前请求不泄漏给开关网络、两方法同动作同环境、空任务critic与无审计时的梯度最大值。测试使用系统临时目录；真实输入试跑与合成语义测试分开记录。
 
 test_parallel_collection.py检查同种子串行episode参考与并行buffer/动作一致、GAE边界、尾段bootstrap、行为概率、恢复及短交替更新的快照刷新/冻结层。它不与旧串行全局随机流强行比较。benchmark_collection.py仅测真实训练采样时间和动作/物理结果哈希，不更新网络，不跑独立评价，不保存结果目录。

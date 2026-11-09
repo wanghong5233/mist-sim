@@ -45,7 +45,7 @@ mist-sim/
 & D:/Anaconda/envs/pytorch/python.exe scripts/maintenance/check_environment.py
 ```
 
-确认executable及package_path。后续命令同样使用该绝对解释器；其他机器安装`pip install -e ".[monitoring]"`，开发测试用`".[test]"`。本机TensorBoard已安装。PPO默认CPU；离线测量可用GPU。仿真只查数值剖面，不加载三个视觉模型，不需训练视觉网络。
+确认executable及package_path。后续命令同样使用该绝对解释器；其他机器安装`pip install -e ".[monitoring]"`，开发测试用`".[test]"`。本机TensorBoard已安装。环境/采样固定CPU，PPO更新支持--device cpu或cuda；CPU仍为跨机器默认，CUDA不可用时报错。仿真只查数值剖面，不加载三个视觉模型，不需训练视觉网络。
 
 普通安装同样支持：从克隆的mist-sim根目录运行，CLI优先使用当前工程配置；从其他目录运行时显式传`--root 工程路径`。验证套件从工程根运行，不假定机器上存在论文目录。
 
@@ -83,6 +83,7 @@ mist-sim/
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method hpgi --dry-run
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method hpgi --seed 4200001
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --method joint_ppo --seed 4200001
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --overlay configs/algorithms/cuda_update.json --method joint_ppo --seed 4200001
 & D:/Anaconda/envs/pytorch/python.exe scripts/training/compare_mechanisms.py --config configs/conditional.json --slots 32768 --seed 4200001
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim evaluate --checkpoint logs/runs/<训练ID>/checkpoints/last.pt --seed 4400019
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim replay --checkpoint logs/runs/<训练ID>/checkpoints/last.pt --records logs/runs/<评价ID>/traces/evaluation.json
@@ -91,6 +92,8 @@ mist-sim/
 ```
 
 占位ID替换为实际运行路径；学习方法必须加载自己的权重。`--overlay 文件.json`和`--set ppo.learning_rate=0.0001`严格覆盖配置，未知键报错；上下层可通过ppo_layers独立配置。变更源码/配置/剖面后拒绝无说明续训。
+
+只切换更新设备可用--device cuda；cuda_update.json另外把minibatch设为128，不改变1024物理槽rollout。大块输入按类型整批上传，在多个epoch与KL检查间复用；更新结束后策略及Adam状态回CPU以供采样/保存。相同源码检查点可通过--checkpoint 路径 --device cpu/cuda跨设备继续，其他超参数仍需一致；旧源码检查点不会自动冒充兼容续训。GPU运行记录device_metrics（含搬运/回传/峰值显存）与input_pack_transfer_seconds，整轮效率以实际phase_seconds判断。
 
 `joint_ppo`采用公共ppo设置（不接受冲突的ppo_layers覆盖）：一个iteration只采样fast_slots个物理槽，两个组件共同更新；slow_intervals不控制该方法的采样预算。默认1024槽对应1280个事件transition，最多5epoch、每小批64个事件。hpgi仍分别采样两个1024槽。比较脚本先共同校准/预训练一次，再从相同权重、Adam状态、归一化和随机状态出发；--slots指每种方法预训练之后的物理交互预算，须整除两者iteration大小，32768对应HPGI16轮和joint_ppo32轮，不是收敛轮数。8worker取自conditional配置。默认没有独立评价，只有显式--evaluation-trajectories N才在每种方法结束后各做一次共同开发输入评价，不逐轮额外采样。
 

@@ -21,10 +21,26 @@ class RolloutTensors:
     def __init__(self, policy, samples):
         self.entries = {}
         self.decisions = {}
+        self.frames = {}
+        arrays = {torch.float32: [], torch.long: [], torch.bool: []}
+        sizes = {dtype: 0 for dtype in arrays}
+        numpy_types = {torch.float32: np.float32, torch.long: np.int64, torch.bool: np.bool_}
+
+        def pack(values, dtype=torch.float32):
+            values = np.asarray(values, dtype=numpy_types[dtype]).reshape(-1)
+            result = dtype, sizes[dtype], len(values)
+            arrays[dtype].append(values)
+            sizes[dtype] += len(values)
+            return result
+
         def add(values, width):
             if id(values) not in self.entries:
-                self.entries[id(values)] = (values, tensor(policy, values).reshape(-1, width))
+                self.entries[id(values)] = (values, pack(values), width)
+
         def frame(value):
+            if id(value) in self.frames:
+                return
+            self.frames[id(value)] = dict(remaining=pack(value.get("remaining", [[1., 1., 1.]] * len(value["servers"]))))
             for key, width in (("items", 19), ("servers", 13), ("context", policy.context_norm.mean.numel())):
                 add(value[key], width)
             if "allocated" in value:
@@ -35,13 +51,32 @@ class RolloutTensors:
             frame(sample["frame"])
             for step in sample["steps"]:
                 self.decisions[id(step)] = dict(
-                    mask=tensor(policy, step["mask"], torch.bool),
-                    action=tensor(policy, [step["action"]], torch.long),
-                    latent=tensor(policy, [step["rate_latent"]]) if step.get("rate_latent") is not None else None)
+                    mask=pack(step["mask"], torch.bool),
+                    action=pack([step["action"]], torch.long),
+                    latent=pack([step["rate_latent"]]) if step.get("rate_latent") is not None else None)
                 if "prefix_frame" in step:
                     frame(step["prefix_frame"])
                 add(step["features"], 19)
                 add(step["prefix"], 7)
+        self.storage = {}
+        for dtype, chunks in arrays.items():
+            combined = np.concatenate(chunks) if chunks else np.empty(0, dtype=numpy_types[dtype])
+            if dtype == torch.float32 and not np.isfinite(combined).all():
+                raise ValueError("Nonfinite rollout input")
+            self.storage[dtype] = torch.from_numpy(combined).to(policy.value_scale.device)
+
+        def view(description):
+            dtype, offset, length = description
+            return self.storage[dtype][offset:offset + length]
+
+        self.entries = {identity: (values, view(description).reshape(-1, width))
+                        for identity, (values, description, width) in self.entries.items()}
+        self.decisions = {identity: {key: view(description) if description is not None else None
+                                    for key, description in row.items()} for identity, row in self.decisions.items()}
+        self.frames = {identity: {"remaining": view(row["remaining"]).reshape(-1, 3)}
+                       for identity, row in self.frames.items()}
+        self.storage_bytes = sum(value.numel() * value.element_size() for value in self.storage.values())
+        self.host_to_device_copies = sum(bool(value.numel()) for value in self.storage.values()) if policy.value_scale.is_cuda else 0
 
     def rows(self, values):
         return self.entries[id(values)][1]
@@ -78,7 +113,9 @@ def encode_frames(policy, frames, critic=False, cache=None, with_servers=False, 
         request_values = values.new_zeros((len(lengths), hidden))
         if len(values):
             owners = tensor(policy, np.repeat(np.arange(len(lengths)), lengths), torch.long)
-            target_rows = tensor(policy, [row for group in item_server_groups for row in group]).reshape(-1, 13)
+            target_rows = (torch.cat([cache.rows(rows) for rows in item_server_groups])
+                           if cache is not None and all(id(rows) in cache.entries for rows in item_server_groups) else
+                           tensor(policy, [row for group in item_server_groups for row in group]).reshape(-1, 13))
             if len(target_rows) != len(values):
                 raise ValueError("Candidate/server association mismatch")
             target_values = server_encoder(policy.server_norm(target_rows)) * (values[:, 2:3] > 0)
@@ -119,12 +156,15 @@ def encode_frames(policy, frames, critic=False, cache=None, with_servers=False, 
     allocated_count = values.new_zeros(len(server_rows))
     if allocated_rows:
         owner_ids = tensor(policy, allocated_owners, torch.long)
-        encoded = item_encoder(policy.item_norm(tensor(policy, allocated_rows)))
+        allocated_tensor = (torch.cat([cache.rows(frame["allocated"]) for frame in frames if frame.get("allocated")])
+                            if cache is not None else tensor(policy, allocated_rows))
+        encoded = item_encoder(policy.item_norm(allocated_tensor))
         allocated_pool = allocated_pool.index_add(0, owner_ids, encoded)
         allocated_count = torch.bincount(owner_ids, minlength=len(server_rows)).to(values.dtype)
         allocated_pool = allocated_pool / allocated_count.clamp(min=1)[:, None]
-    remaining = tensor(policy, [row for frame in frames for row in
-                               frame.get("remaining", [[1., 1., 1.]] * len(frame["servers"]))]).reshape(-1, 3)
+    remaining = (torch.cat([cache.frames[id(frame)]["remaining"] for frame in frames]) if cache is not None else
+                 tensor(policy, [row for frame in frames for row in
+                        frame.get("remaining", [[1., 1., 1.]] * len(frame["servers"]))]).reshape(-1, 3))
     remaining = remaining / (1 + remaining.abs())
     servers = resource_encoder(torch.cat((server_encoder(policy.server_norm(server_rows)), allocated_pool,
                                          remaining, allocated_count.log1p()[:, None]), dim=1))

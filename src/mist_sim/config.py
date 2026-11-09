@@ -182,8 +182,8 @@ def validate(config):
         raise ValueError("Invalid reward normalization settings")
     if type(normalization["enabled"]) is not bool or normalization["max_abs_slot_reward"] <= 0:
         raise ValueError("Invalid reward normalization bounds")
-    if config.get("device") != "cpu":
-        raise ValueError("This implementation supports CPU only")
+    if config.get("device") not in ("cpu", "cuda"):
+        raise ValueError("device must be cpu or cuda; sampling always uses CPU")
     for key in ("horizon", "window", "terminals", "k", "history_slots"):
         if type(config[key]) is not int or config[key] < 1:
             raise ValueError(key)

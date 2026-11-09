@@ -114,7 +114,7 @@ def joint_phase(trainer, name, count):
 
     snapshot = tuple(trainer.versions[phase] for phase in ("upper", "lower"))
     diagnostics = update(trainer.joint_policy, trainer.optimizers["joint"], buffer, settings,
-        snapshot, snapshot, audit, trainer.check_budget, report_epoch)
+        snapshot, snapshot, audit, trainer.check_budget, report_epoch, device=trainer.config["device"])
     diagnostics["training_event_reward_mean"] = diagnostics["training_reward_mean"]
     diagnostics["training_reward_mean"] = sum(training_reward(record, units) for record in records) / len(records)
     updated = time.perf_counter()

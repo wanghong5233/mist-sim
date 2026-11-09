@@ -19,7 +19,7 @@
 
 ## State、动作与网络
 
-|张量（float32/CPU）|快层|慢层|
+|张量（float32，采样时CPU）|快层|慢层|
 |---|---|---|
 |items `[候选数,19]`|当前公开请求的物理候选；request_sizes保留每个请求的分组|历史公开请求的同语义候选；开关动作另由独立actor_actions编码|
 |servers `[H,13]`|服务器资源/功耗、激活/就绪、历史利用等|同类公开服务器特征|
@@ -98,7 +98,11 @@ PPO更新通过`policies/batching.py`执行小批张量前向/反向：按候选
 
 每个epoch的loss/熵/clip等按实际小批样本数加权，尾批不与满批等权；gradient_after_clip_max始终取本次更新全部小批的最大联合梯度范数，不依赖详细审计开关。actor/critic分别裁剪，联合范数上界为sqrt(2)×max_grad_norm。KL另在epoch后对全部rollout分块批量重算，不计算无用critic。更新前概率复核也走同一批量路径。`metrics.jsonl`单列diagnostics_seconds、trace_write_seconds、probability_check_seconds及update_timings（前向/loss、反向/step、KL），不把阶段剩余时间冒称磁盘写入。轨迹JSON不缩进，完整数值和独立复算接口保持不变。
 
-`runtime.torch_threads`可配置CPU算子线程数，默认1；小网络串行采样与批量更新对线程数的收益不同，需按整条链路实测，不能用线程数推断并行效率。`scripts/validation/benchmark_batching.py`默认使用合成变长输入，也可传--behavior读取已有轨迹，只测量不写结果或更新权重。
+device=cpu/cuda只选择PPO更新设备。环境、P3、匿名发布、8个采样worker、GAE及优势统计均在CPU；worker强制device=cpu，不创建CUDA更新器。devices.update_device在每次完整update入口移动策略/Adam矩，在finally回CPU，参数对象身份不变；Adam step计数保持CPU。保存和恢复均以CPU权重/优化器为边界，同源码允许只覆盖device，仍严格检查其余配置及输入。CUDA缺失报错，不静默退回CPU；OOM/异常也恢复CPU后由原失败路径保存诊断快照。
+
+RolloutTensors按float32/int64/bool打包整批输入，各一块连续存储；所有视图共享底层张量。PPO旧概率/优势/目标/有效标记另外合成一块float32上传，完整epoch和KL复核复用这些原始张量，梯度所需激活逐步重算。目标服务器、已指派任务和剩余资源也复用GPU缓存；小批分组/索引元数据仍由CPU构建并传入，不把rollout_tensor_transfers=4误称全部CUDA传输仅4次。不会逐时隙、逐epoch搬运大块状态，也不在正常更新中逐批empty_cache。device_metrics报告模型搬入/回传、完整更新耗时与峰值allocated/reserved显存；input_pack_transfer_seconds包含CPU整理和上传，计时不是纯PCIe带宽。
+
+`runtime.torch_threads`可配置CPU算子线程数，默认1；小网络串行采样与批量更新对线程数的收益不同，需按整条链路实测。`scripts/validation/benchmark_batching.py`测CPU串行/批量路径；benchmark_update_device.py的--full-rollout在同一真实buffer及权重/Adam快照下比较CPU64和CUDA64/128/256，含搬运/KL/回传，为等5epoch计时仅在探针中放宽KL阈值。--snapshot-only显式导入旧完成快照仅作独立性能诊断，不恢复运行或写结果。CPU64/CUDA64为设备对照；128/256同时减少梯度步数，不能将全部收益归于硬件或宣称更易收敛。
 
 conditional终端按Iteration及两个步骤显示服务器PPO、调度PPO；进度条单行更新，末尾汇总采样平均reward/slot、两层loss、采样/PPO耗时。TensorBoard的iteration/train与cycles.csv采用完整交替编号。详细行为/更新审计按diagnostics.phase_interval采样保存，轻量统计与CSV每轮保留。显式启用validation时才增加第三步和对应评价结果，打印同样使用单槽均值；episode累计回报单列，不与归一化训练reward混用。
 

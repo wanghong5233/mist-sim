@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import time
 from .policies.batching import replay_batch, replay_chunks, values_batch, RolloutTensors
+from .devices import update_device, synchronize
 
 
 def parameter_group(name):
@@ -36,7 +37,16 @@ def loss_terms(logprob, old, advantage, values, target, entropy, actor_valid, co
     return total, actor_loss, value_loss, entropy_bonus, ratio, logratio
 
 
-def update(policy, optimizer, buffer, config, behavior_version, opponent_version, audit=None, check_budget=None, on_epoch=None):
+def update(policy, optimizer, buffer, config, behavior_version, opponent_version, audit=None, check_budget=None, on_epoch=None, device="cpu"):
+    started = time.perf_counter()
+    with update_device(policy, optimizer, device) as placement:
+        result = _update(policy, optimizer, buffer, config, behavior_version, opponent_version,
+                         audit, check_budget, on_epoch)
+    result["device_metrics"] = dict(placement, total_update_seconds=time.perf_counter() - started)
+    return result
+
+
+def _update(policy, optimizer, buffer, config, behavior_version, opponent_version, audit, check_budget, on_epoch):
     buffer.consume(behavior_version, opponent_version)
     if not buffer.samples:
         raise ValueError("Empty rollout")
@@ -50,11 +60,16 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
                      returns=returns.tolist(), minibatches=[], epoch_checks=[],
                      td_errors=[sample["reward"] + config["gamma"] ** sample["duration"] * sample["next_value"] *
                                 (not sample["terminated"]) - sample["value"] for sample in buffer.samples])
+    device = policy.value_scale.device
+    packing_started = time.perf_counter()
     input_cache = RolloutTensors(policy, buffer.samples)
-    old_all = torch.tensor([sample["logprob"] for sample in buffer.samples])
-    advantages_all = torch.tensor(advantages, dtype=torch.float32)
-    targets_all = torch.tensor(returns, dtype=torch.float32)
-    valid_all = torch.tensor([bool(sample["steps"]) for sample in buffer.samples])
+    targets = np.column_stack(([sample["logprob"] for sample in buffer.samples], advantages, returns,
+                               [bool(sample["steps"]) for sample in buffer.samples])).astype(np.float32)
+    target_tensor = torch.from_numpy(targets).to(device)
+    old_all, advantages_all, targets_all = target_tensor[:, 0], target_tensor[:, 1], target_tensor[:, 2]
+    valid_all = target_tensor[:, 3].bool()
+    synchronize(device)
+    packing_seconds = time.perf_counter() - packing_started
     diagnostics = []
     phase_diagnostics = {phase: [] for phase in getattr(policy, "phase_policies", {})}
     timings = dict(forward_loss_seconds=0.0, backward_step_seconds=0.0, kl_check_seconds=0.0)
@@ -146,6 +161,9 @@ def update(policy, optimizer, buffer, config, behavior_version, opponent_version
     output = {key: float(np.average([item[key] for item in diagnostics], weights=[item["batch_size"] for item in diagnostics]))
               for key in diagnostics[0] if key not in ("epoch", "batch_size")}
     output.update(samples=sample_count, optimizer_steps=len(diagnostics), explained_variance=explained,
+                  input_pack_transfer_seconds=packing_seconds,
+                  rollout_tensor_bytes=input_cache.storage_bytes,
+                  rollout_tensor_transfers=input_cache.host_to_device_copies + int(device.type == "cuda"),
                   update_timings=timings,
                   post_update_joint_kl=post_kl, gradient_after_clip_max=max(item["gradient_after_clip"] for item in diagnostics),
                   durations=[sample["duration"] for sample in buffer.samples],

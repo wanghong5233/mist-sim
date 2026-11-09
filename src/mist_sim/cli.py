@@ -26,6 +26,7 @@ def main(argv=None):
     parser.add_argument("--overlay", type=Path, action="append", default=[])
     parser.add_argument("--set", dest="overrides", action="append", default=[])
     parser.add_argument("--method", choices=METHODS)
+    parser.add_argument("--device", choices=("cpu", "cuda"), help="PPO update device; environment and sampling stay on CPU")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--trace", type=Path)
@@ -66,17 +67,20 @@ def main(argv=None):
 def execute(args):
     torch.set_num_threads(1)
     if args.checkpoint:
-        trainer = Trainer.load(args.checkpoint)
+        trainer = Trainer.load(args.checkpoint, device=args.device)
         config = trainer.config
         if args.config:
             config = load_config(args.config, args.overlay, args.overrides)
             config = for_method(config, args.method or config["method"])
-            trainer = Trainer.load(args.checkpoint, config)
+            trainer = Trainer.load(args.checkpoint, config, device=args.device)
+            config = trainer.config
         elif args.method and args.method != config["method"]:
             raise ValueError("Cannot relabel checkpoint method")
     else:
         config = load_config(args.config or args.root / "configs" / "smoke.json", args.overlay, args.overrides)
         config = for_method(config, args.method or config["method"])
+        if args.device is not None:
+            config["device"] = args.device
         trainer = None
     if args.dry_run:
         if config["method"] == "greedy_consolidation":
