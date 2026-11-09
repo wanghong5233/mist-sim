@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 import numpy as np
 from .buffers import normalize_advantages
+from .learning_analysis import advantage_quality
 
 
 def close(actual, expected, name, atol=2e-5):
@@ -72,7 +73,8 @@ def rollout_diagnostics(buffer, settings):
                 if signal.std() > 1e-12 and slots.std() > 1e-12 else None,
             pre_update_explained_variance=float(1 - np.var(phase_targets - values) / np.var(phase_targets))
                 if np.var(phase_targets) > 1e-12 else None,
-            mean_decisions=float(np.mean([len(sample["steps"]) for sample, keep in zip(samples, selected) if keep])))
+            mean_decisions=float(np.mean([len(sample["steps"]) for sample, keep in zip(samples, selected) if keep])),
+            quality=advantage_quality([sample for sample, keep in zip(samples, selected) if keep], signal, gamma))
     return dict(transitions=len(samples), physical_slots=sum(sample["duration"] for sample in samples),
         episode_segments=len({sample.get("episode_id") for sample in samples}),
         terminated=sum(sample["terminated"] for sample in samples),

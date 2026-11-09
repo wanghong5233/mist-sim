@@ -7,6 +7,7 @@
 |training/|compare_mechanisms.py --slots 32768|共同预训练后，等物理槽预算比较HPGI与joint_ppo；--overlay将同一加速/学习配置应用到双方。默认无独立评价，--evaluation-trajectories N仅结束时评价一次|
 |validation/|benchmark_collection.py --checkpoint 路径|同冻结策略和8条输入轨迹比较2/4/6/8worker；区分冷启动、重复暖池中位数、worker墙钟/CPU/P3及回传等待，核对动作/概率/物理结果哈希；仅打印，旧快照只作诊断|
 |validation/|diagnose_learning.py --checkpoint 路径|默认检查策略/熵梯度和固定公开状态的8次局部PPO学习；--joint-updates N --lambdas .95 .8对比GAE lambda，--normalization global或phase控制优势标准化。仅在内存采样/更新，前后用相同两条诊断轨迹比较，不续训旧记录、不写正式结果|
+|validation/|inspect_learning_quality.py --run 路径 --stage cycle_022_joint|只读复算奖励分项、可避免的高成本动作、终止处价值误差、按时间位置分组的优势方差；完整gamma=1联合轨迹另与留一episode的剩余时间基线对比。仅打印及输入哈希，不更新参数，不写结果|
 |data/|profile_models.py|官方模型及输入准备、串行离线测量|
 |data/|export_profiles.py --verify-saved|导出/复算已保存剖面|
 |data/|check_inputs.py|输入、物理和重放检查；默认临时运行|

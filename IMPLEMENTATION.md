@@ -98,7 +98,7 @@ behavior采用`mist.behavior.shared.v1`共享frame/特征组格式，避免重�
 
 PPO更新通过`policies/batching.py`执行小批张量前向/反向：按候选→请求→状态分段池化、按指派绑定服务器，随后批量计算掩码概率并沿原前缀汇总。空任务只更新critic，Fixed-Window连续速率密度保留。逐样本replay作独立测试参照。采样保留物理时序与资源前缀依赖，单次no_grad动作内复用不变的请求编码，跨参数更新不缓存激活。上层前缀共享只读请求/候选，改变服务器行；校准统计按共享输入去重，避免多前缀重复加权。
 
-每个epoch的loss/熵/clip等按实际小批样本数加权，尾批不与满批等权；gradient_after_clip_max始终取本次更新全部小批的最大联合梯度范数，不依赖详细审计开关。actor/critic分别裁剪，联合范数上界为sqrt(2)×max_grad_norm。KL另在epoch后对全部rollout分块批量重算，不计算无用critic。更新前概率复核也走同一批量路径。`metrics.jsonl`单列diagnostics_seconds、trace_write_seconds、probability_check_seconds及update_timings（前向/loss、反向/step、KL），不把阶段剩余时间冒称磁盘写入。rollout.learning_signal分组件记录更新前优势均值/标准差/正值比例、与时隙位置的相关性和价值解释方差；训练后的critic拟合不能证明策略收益改善。轨迹JSON不缩进，完整数值和独立复算接口保持不变。
+每个epoch的loss/熵/clip等按实际小批样本数加权，尾批不与满批等权；gradient_after_clip_max始终取本次更新全部小批的最大联合梯度范数，不依赖详细审计开关。actor/critic分别裁剪，联合范数上界为sqrt(2)×max_grad_norm。KL另在epoch后对全部rollout分块批量重算，不计算无用critic。更新前概率复核也走同一批量路径。`metrics.jsonl`单列diagnostics_seconds、trace_write_seconds、probability_check_seconds及update_timings（前向/loss、反向/step、KL），不把阶段剩余时间冒称磁盘写入。rollout.learning_signal分组件记录更新前优势均值/标准差/正值比例、与时隙位置的相关性和价值解释方差；quality另记终止处value/reward/TD、bootstrap相对reward的波动，以及跨episode重复时间位置的组均值方差占比（描述性统计，不自动判错）。训练后的critic拟合不能证明策略收益改善。inspect_learning_quality.py从保存的公开请求/动作重新求P3成本，量化可直接替换为本地执行的逐槽节省下界；完整未裁剪gamma=1联合轨迹可离线重算留一episode的时间基线GAE，不将其用于训练或更改奖励。轨迹JSON不缩进，完整数值和独立复算接口保持不变。
 
 采样请求编码命中缓存时不再重建整组候选张量；梯度更新仍重算激活。环境逐槽复用已验证Profiles，区间剖面界使用对象内有界缓存并返回独立字典。主进程为溯源生成的轨迹传给worker，避免重复生成；无store的诊断仍由worker生成。P3内层为单调区间保护的Newton迭代，外层维持对偶二分，只在可行侧达到容量容差时提前结束。collection_timing区分准备、进程池等待、每条轨迹CPU/墙钟/P3耗时及返回等待；后者含序列化、传输、反序列化和主进程调度，不称作纯通信时间。进程数通过同快照、同轨迹的重复暖池测量选择，不自动修改正在运行的配置。
 
