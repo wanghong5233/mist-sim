@@ -156,6 +156,14 @@ def resolve(root, path):
     return (path if path.is_absolute() else root / path).resolve()
 
 
+def portable_path(path, root):
+    """Keep result snapshots relocatable with their project root."""
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
+
+
 def write_csv(path, fields, rows):
     with path.open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields)
@@ -254,8 +262,8 @@ def plot_curves(settings, root):
     write_csv(output / "source_data.csv", DATA_FIELDS, data)
     write_csv(output / "aggregate.csv", ["metric", "label", "x", "seeds", "mean", "lower", "upper"], aggregate_rows)
     data_digest = hashlib.sha256((output / "source_data.csv").read_bytes()).hexdigest()
-    frozen = dict(settings, data_file=str(output / "source_data.csv"), data_sha256=data_digest,
-                  source_provenance=sources, output=str(output))
+    frozen = dict(settings, data_file=portable_path(output / "source_data.csv", root), data_sha256=data_digest,
+                  source_provenance=sources, output=portable_path(output, root))
     (output / "plot_config.json").write_text(json.dumps(frozen, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     distribution = metadata.distribution("SciencePlots")
     style_files = [distribution.locate_file(item) for item in distribution.files

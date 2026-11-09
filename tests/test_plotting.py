@@ -77,6 +77,13 @@ def test_exported_snapshot_replots_after_source_changes_and_rejects_tampering(tm
     assert second["summary"][0]["common_points"] == 2
     assert (output / "aggregate.csv").read_bytes() == before
     assert (output / "reward_per_slot_en.png").is_file()
+    # A copied project can replay its frozen data without the original CSV.
+    import shutil
+    relocated = tmp_path / "relocated"
+    shutil.copytree(output, relocated / "figures")
+    moved = plot_curves(frozen, relocated)
+    assert moved["summary"][0]["common_points"] == 2
+    assert (relocated / "figures" / "aggregate.csv").read_bytes() == before
     snapshot = output / "source_data.csv"
     snapshot.write_bytes(snapshot.read_bytes() + b"changed")
     with pytest.raises(ValueError, match="Frozen plot data changed"):
