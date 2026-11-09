@@ -170,9 +170,15 @@ class TrainingMonitor:
     def scalars(self, prefix, values, step):
         if self.writer is None:
             return
-        for name, value in values.items():
-            if value is not None and math.isfinite(float(value)):
-                self.writer.add_scalar(prefix + "/" + name, float(value), step)
+        pending = [(prefix, values)]
+        while pending:
+            group_prefix, group = pending.pop()
+            for name, value in group.items():
+                tag = group_prefix + "/" + name
+                if isinstance(value, dict):
+                    pending.append((tag, value))
+                elif value is not None and math.isfinite(float(value)):
+                    self.writer.add_scalar(tag, float(value), step)
         self.writer.flush()
 
     def record(self, event, fields):

@@ -1,10 +1,26 @@
 import copy
+from unittest.mock import Mock
 
 import pytest
 
 from mist_sim.learning_analysis import advantage_quality, clock_baseline_probe, public_action_quality
 from mist_sim.environment import Environment, PublicProblem
 from mist_sim.anonymity import generate_trace
+
+
+def test_nested_quality_reaches_tensorboard_without_nonfinite_values():
+    from mist_sim.monitoring import TrainingMonitor
+    monitor = TrainingMonitor(None, False)
+    monitor.writer = Mock()
+    monitor.record("rollout_ready", dict(total_slots=1024, rollout=dict(learning_signal=dict(lower=dict(
+        advantage_std=.16, quality=dict(position_mean_variance_fraction=.89,
+            terminal=dict(value_mean=-.46, reward_mean=-.025, missing=None, invalid=float("nan"))))))))
+    calls = {call.args[0]: call.args[1:] for call in monitor.writer.add_scalar.call_args_list}
+    assert calls == {"signal/lower/advantage_std": (.16, 1024),
+        "signal/lower/quality/position_mean_variance_fraction": (.89, 1024),
+        "signal/lower/quality/terminal/value_mean": (-.46, 1024),
+        "signal/lower/quality/terminal/reward_mean": (-.025, 1024)}
+    monitor.writer.flush.assert_called_once()
 
 
 def clock_samples():
