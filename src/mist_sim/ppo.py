@@ -4,6 +4,7 @@ import torch
 import time
 from .policies.batching import replay_batch, replay_chunks, values_batch, RolloutTensors
 from .devices import update_device, synchronize
+from .buffers import normalize_advantages
 
 
 def parameter_group(name):
@@ -53,8 +54,7 @@ def _update(policy, optimizer, buffer, config, behavior_version, opponent_versio
     advantages, returns = buffer.advantages(config["gamma"], config["gae_lambda"])
     raw_advantages = advantages.copy()
     initial_parameters = {name: parameter.detach().clone() for name, parameter in policy.named_parameters()}
-    if len(advantages) > 1:
-        advantages = (advantages - advantages.mean()) / max(advantages.std(), 1e-8)
+    advantages = normalize_advantages(advantages, buffer.samples, config.get("advantage_normalization", "global"))
     if audit is not None:
         audit.update(settings=dict(config), advantages=raw_advantages.tolist(), normalized_advantages=advantages.tolist(),
                      returns=returns.tolist(), minibatches=[], epoch_checks=[],

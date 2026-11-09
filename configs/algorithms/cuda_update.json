@@ -1,4 +1,5 @@
 {
   "device": "cuda",
+  "runtime": {"collection_workers": 4},
   "ppo": {"minibatch": 128}
 }

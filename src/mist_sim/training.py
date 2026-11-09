@@ -101,6 +101,8 @@ class Trainer:
         self.cycle_history = []
         self.collectors = None
         self.collection_stop = None
+        self.collection_trace = None
+        self.collection_timings = {}
 
     def close(self):
         if self.collectors is not None:
@@ -132,7 +134,10 @@ class Trainer:
         if trace_seed in self.validation_seeds() or trace_seed == self.config["seeds"]["test"]:
             raise ValueError("Training substream collides with validation/test seed")
         self.trace_counter += 1
-        trace = generate_trace(self.config, trace_seed)
+        trace = self.collection_trace
+        self.collection_trace = None
+        if trace is None:
+            trace = generate_trace(self.config, trace_seed)
         if self.store:
             self.store.write_json(f"traces/inputs/input_{self.trace_counter:05d}.json", {"seed": trace_seed, "trace": trace})
             self.store.record_input_seed(self.trace_counter, trace_seed)
@@ -207,10 +212,11 @@ class Trainer:
 
     def _collect_parallel(self, layer, count, pretrain):
         from .collection import EpisodeCollectors
+        preparation_started = time.perf_counter()
         if self.collectors is None:
             self.collectors = EpisodeCollectors(self.config, self.seed, self.config["runtime"]["collection_workers"])
         per_episode = self.config["horizon"] if layer in ("lower", "joint") else math.ceil(self.config["horizon"] / self.config["window"])
-        jobs = []
+        jobs, traces = [], {}
         for offset in range(0, count, per_episode):
             trace_index = self.trace_counter
             trace_seed = self.seed + 10000 * trace_index
@@ -219,10 +225,14 @@ class Trainer:
             self.trace_counter += 1
             jobs.append((trace_index, min(per_episode, count - offset)))
             if self.store:
+                traces[trace_index] = generate_trace(self.config, trace_seed)
                 self.store.write_json(f"traces/inputs/input_{self.trace_counter:05d}.json",
-                                      dict(seed=trace_seed, trace=generate_trace(self.config, trace_seed)))
+                                      dict(seed=trace_seed, trace=traces[trace_index]))
                 self.store.record_input_seed(self.trace_counter, trace_seed)
-        outputs = self.collectors.collect(self, jobs, layer, pretrain)
+        preparation_seconds = time.perf_counter() - preparation_started
+        outputs = self.collectors.collect(self, jobs, layer, pretrain, traces)
+        self.collection_timings["preparation_seconds"] = preparation_seconds
+        self.event("collection_timing", layer=layer, **self.collection_timings)
         opponent = "lower" if layer == "upper" else "upper"
         if layer == "joint":
             from .buffers import EventRolloutBuffer

@@ -93,9 +93,15 @@ mist-sim/
 
 占位ID替换为实际运行路径；学习方法必须加载自己的权重。`--overlay 文件.json`和`--set ppo.learning_rate=0.0001`严格覆盖配置，未知键报错；上下层可通过ppo_layers独立配置。变更源码/配置/剖面后拒绝无说明续训。
 
-只切换更新设备可用--device cuda；cuda_update.json另外把minibatch设为128，不改变1024物理槽rollout。大块输入按类型整批上传，在多个epoch与KL检查间复用；更新结束后策略及Adam状态回CPU以供采样/保存。相同源码检查点可通过--checkpoint 路径 --device cpu/cuda跨设备继续，其他超参数仍需一致；旧源码检查点不会自动冒充兼容续训。GPU运行记录device_metrics（含搬运/回传/峰值显存）与input_pack_transfer_seconds，整轮效率以实际phase_seconds判断。
+只切换更新设备可用--device cuda；cuda_update.json另外选择minibatch128及4个CPU采样进程，不改变1024物理槽rollout。进程数可通过--set runtime.collection_workers=8等覆盖，benchmark_collection.py可在同输入下重新测量；本机测量波动较大，4进程不是跨机器最优保证。大块输入按类型整批上传，在多个epoch与KL检查间复用；更新结束后策略及Adam状态回CPU以供采样/保存。相同源码检查点可通过--checkpoint 路径 --device cpu/cuda跨设备继续，其他超参数仍需一致；旧源码检查点不会自动冒充兼容续训。GPU运行记录device_metrics（含搬运/回传/峰值显存）与input_pack_transfer_seconds，整轮效率以实际phase_seconds判断。
 
 `joint_ppo`采用公共ppo设置（不接受冲突的ppo_layers覆盖）：一个iteration只采样fast_slots个物理槽，两个组件共同更新；slow_intervals不控制该方法的采样预算。默认1024槽对应1280个事件transition，最多5epoch、每小批64个事件。hpgi仍分别采样两个1024槽。比较脚本先共同校准/预训练一次，再从相同权重、Adam状态、归一化和随机状态出发；--slots指每种方法预训练之后的物理交互预算，须整除两者iteration大小，32768对应HPGI16轮和joint_ppo32轮，不是收敛轮数。8worker取自conditional配置。默认没有独立评价，只有显式--evaluation-trajectories N才在每种方法结束后各做一次共同开发输入评价，不逐轮额外采样。
+
+`ppo.advantage_normalization`默认global，保留全rollout共同标准化作为对照；`configs/algorithms/joint_phase_normalized.json`选择joint_ppo及phase，分别对开关/调度事件的actor优势减均值、除标准差，避免两个critic的不同误差尺度混入同一标准化。原始reward、跨phase GAE和critic目标不变；优势在更新前计算一次，所有epoch复用。此选项改变组件间的策略梯度尺度，不是已证明的收敛修复。GPU配置可组合预览：
+
+```powershell
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --overlay configs/algorithms/cuda_update.json --overlay configs/algorithms/joint_phase_normalized.json --seed 4200001 --dry-run
+```
 
 等物理槽不等于等优化计算量：默认每2048槽，HPGI最多100个Adam步骤，joint_ppo为200个。comparison.csv并列实际训练transition、样本使用次数、优化步数与分项耗时；两者统一冷启动采样池。不能由“只采样一次”推断联合方法整体更快，详细口径见IMPLEMENTATION。
 
@@ -139,9 +145,9 @@ iterations.csv保存原始reward总和/每物理槽均值、归一化训练rewar
 
 当前HPGI：128槽一个episode；每次快层rollout为1024个transition，慢层为256个区间transition（Q4时同为1024槽）；采样后最多遍历5个PPO epoch。epoch不包含新的episode，不是重新采样。上限为8192预训练槽＋3000次慢/快交替＝6152192训练槽，校准/验证另计；奖励稳定可提前停止，`--dry-run`零采样显示实际方法的上限。
 
-conditional的runtime.collection_workers=8，每批8条完整系统轨迹同时采样。一条轨迹内两组件共同决策，只有一份逐槽系统奖励，上层将它按Q区间累计。当前选择交替更新：旧开关/旧调度采样后更新开关，新开关/旧调度重新采样后更新调度；这是一种训练设计，不是PPO唯一方式或有效性证明。同一批轨迹联合更新两组件也是可另行实现比较的方案，不能直接套用当前冻结对手的更新逻辑。
+conditional基础配置的runtime.collection_workers=8，cuda_update覆盖为4；每批仍为8条完整系统轨迹。一条轨迹内两组件共同决策，只有一份逐槽系统奖励。HPGI交替更新：旧开关/旧调度采样后更新开关，新开关/旧调度重新采样后更新调度；joint_ppo从同一批轨迹联合更新两组件。两种机制均已实现，不由结构推断有效性。
 
-8个进程跨批常驻，每进程PyTorch线程1，主进程收齐后才做PPO；0为旧串行路径，1为单worker的逐episode参考。请求种子和独立动作种子按episode编号分配，按提交顺序合并，不依赖完成快慢；改变worker数量不改变同一批结果，恢复沿trace_counter继续。该独立动作随机流与旧串行连续随机流不同，不宣称旧运行逐动作复现。每条episode内部保留时序和GAE边界，未缩短128槽目标。正常结束/异常关闭进程池；直接调用collect的工具须close。
+采样进程跨批常驻，每进程PyTorch线程1，主进程收齐后才做PPO；0为旧串行路径，1为单worker的逐episode参考。请求种子和独立动作种子按episode编号分配，按提交顺序合并，不依赖完成快慢；改变worker数量不改变同一批结果，恢复沿trace_counter继续。该独立动作随机流与旧串行连续随机流不同，不宣称旧运行逐动作复现。每条episode内部保留时序和GAE边界，未缩短128槽目标。正常结束/异常关闭进程池；直接调用collect的工具须close。
 
 每个rollout使用新建on-policy buffer，保存状态、原动作前缀/掩码、旧联合logprob、价值、奖励、后继状态和终止/截断标志；更新时复算原动作概率，GAE处理bootstrap边界，更新后清空。当前minibatch=64，快层每epoch16批、慢层每epoch4批；5个epoch是本次增加样本复用的试运行值，不是已调优结论。KL超过0.03提前结束本次更新，下一次仍重新采样。
 

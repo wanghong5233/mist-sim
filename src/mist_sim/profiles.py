@@ -6,6 +6,7 @@ class Profiles:
     def __init__(self, config):
         self.models = config["profiles"]
         self._size_keys = {}
+        self._bounds = {}
         self.units = config["units"]
         expected = {"work": "reference_work", "rate": "reference_work/s",
                     "tensor": "bit", "memory": "byte", "energy": "J", "time": "s",
@@ -46,6 +47,14 @@ class Profiles:
         return self.models[model]["sizes"][self._size_keys[model][float(size)]]
 
     def bound(self, model, interval, split, mode):
+        key = model, tuple(interval), split, mode
+        if key not in self._bounds:
+            if len(self._bounds) >= 4096:
+                self._bounds.clear()
+            self._bounds[key] = self._bound(model, interval, split, mode)
+        return dict(self._bounds[key])
+
+    def _bound(self, model, interval, split, mode):
         sizes = [size for size in self.sizes(model) if interval[0] <= size <= interval[1]]
         if not sizes:
             raise ValueError("Interval contains no profiled size")

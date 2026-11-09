@@ -175,6 +175,15 @@ class TrainingMonitor:
             names = ("reward_per_slot", "upper_reward_per_slot", "lower_reward_per_slot", "upper_loss", "lower_loss",
                      "service", "collection_seconds", "update_seconds", "phase_seconds")
             self.scalars("iteration/train", {name: fields[name] for name in names}, fields["cycle_index"])
+        if event == "rollout_ready":
+            for phase, signal in fields["rollout"].get("learning_signal", {}).items():
+                self.scalars("signal/" + phase, signal, fields["total_slots"])
+        elif event == "collection_timing":
+            jobs = fields["jobs"]
+            values = {key: fields[key] for key in ("pool_seconds", "preparation_seconds")}
+            for name in ("worker_seconds", "worker_cpu_seconds", "allocation_seconds", "return_seconds"):
+                values[name + "_max"] = max((row[name] for row in jobs), default=0.)
+            self.scalars("collection/" + fields["layer"], values, fields["total_slots"])
         if event == "ppo_epoch":
             names = ("loss", "actor_loss", "value_loss", "entropy", "post_update_joint_kl", "clip_fraction",
                      "actor_before", "critic_before", "actor_after", "critic_after", "seconds", "total_slots")

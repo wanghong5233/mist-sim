@@ -57,6 +57,7 @@ def load_config(path, overlays=(), overrides=()):
             raise ValueError("External profiles cannot override embedded profiles/units")
         config.update(profiles=component["profiles"], units=component["units"])
     config.setdefault("ppo_layers", {"upper": {}, "lower": {}})
+    config["ppo"].setdefault("advantage_normalization", "global")
     config.setdefault("validation", {"min_service_rate": None, "selection": "best_feasible_cost"})
     config["validation"].setdefault("trajectories", 1)
     config["validation"].setdefault("sampled", False)
@@ -248,8 +249,10 @@ def validate(config):
         settings = layer_settings(config, layer)
         expected = {"hidden", "learning_rate", "adam_epsilon", "clip", "gae_lambda", "gamma",
                     "max_grad_norm", "value_coefficient", "entropy_coefficient", "epochs", "minibatch", "target_kl"}
-        if set(settings) != expected:
+        if not expected <= set(settings) or set(settings) - expected - {"advantage_normalization"}:
             raise ValueError("Unknown/missing PPO setting")
+        if settings.get("advantage_normalization", "global") not in ("global", "phase"):
+            raise ValueError("Invalid advantage normalization")
         for key in ("hidden", "epochs", "minibatch"):
             if type(settings[key]) is not int or settings[key] < 1:
                 raise ValueError(f"Invalid PPO {key}")

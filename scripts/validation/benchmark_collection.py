@@ -1,58 +1,68 @@
-"""Time real training collection without optimizer updates or extra evaluation."""
+"""Compare persistent collector counts using identical frozen policies and traces."""
 import argparse
 import copy
 import hashlib
 import json
 import math
+import statistics
 import time
 
 import torch
 
-from mist_sim.config import load_config
 from mist_sim.training import Trainer
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="configs/conditional.json")
     parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--workers", type=int, nargs="+", default=[1, 8])
+    parser.add_argument("--workers", nargs="+", type=int, default=[2, 4, 6, 8])
+    parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--episodes", type=int, default=8)
-    parser.add_argument("--layer", choices=["upper", "lower"], default="lower")
-    arguments = parser.parse_args()
-    config = load_config(arguments.config)
-    payload = torch.load(arguments.checkpoint, map_location="cpu", weights_only=False)
-    original, current = copy.deepcopy(payload["config"]), copy.deepcopy(config)
-    for key in ("runtime", "validation", "diagnostics", "convergence", "trace_retention", "checkpoint_policy"):
-        original.pop(key, None)
-        current.pop(key, None)
-    if original != current:
-        raise ValueError("Benchmark model/environment configuration differs")
-    if arguments.episodes < 1 or any(workers < 1 for workers in arguments.workers):
-        raise ValueError("Positive episodes/workers required")
+    parser.add_argument("--layer", choices=["upper", "lower", "joint"], default="joint")
+    args = parser.parse_args()
+    if args.repeats < 1 or args.episodes < 1 or any(worker < 1 or worker > 32 for worker in args.workers):
+        parser.error("Positive workers/repeats/slots required")
+    payload = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    per_episode = (math.ceil(payload["config"]["horizon"] / payload["config"]["window"])
+                   if args.layer == "upper" else payload["config"]["horizon"])
     expected = None
-    for workers in arguments.workers:
+    results = []
+    for workers in args.workers:
+        config = copy.deepcopy(payload["config"])
+        config["device"] = "cpu"
         config["runtime"]["collection_workers"] = workers
         trainer = Trainer(config, payload["seed"])
         trainer.controller.load_state_dict(payload["controller"])
         trainer.reward_normalizer.load_state_dict(payload["reward_normalizer"])
         trainer.value_reward_scales = copy.deepcopy(payload["value_reward_scales"])
-        trainer.trace_counter = payload["trace_counter"]
         trainer.versions = copy.deepcopy(payload["versions"])
-        count = arguments.episodes * (config["horizon"] if arguments.layer == "lower" else math.ceil(config["horizon"] / config["window"]))
+        durations = []
         try:
-            started = time.perf_counter()
-            buffer, records = trainer.collect(arguments.layer, count)
-            elapsed = time.perf_counter() - started
-            identity = [{key: value for key, value in record.items() if key != "measured_allocation_seconds"} for record in records]
-            digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
-            if expected is not None and digest != expected:
-                raise AssertionError("Worker count changed sampled actions or physical outcomes")
-            expected = digest
-            print(json.dumps(dict(workers=workers, seconds_including_startup=elapsed,
-                physical_slots=len(records), transitions=len(buffer.samples), same_sample_hash=digest)), flush=True)
+            for repeat in range(args.repeats + 1):
+                trainer.trace_counter = payload["trace_counter"]
+                started = time.perf_counter()
+                buffer, records = trainer.collect(args.layer, args.episodes * per_episode)
+                elapsed = time.perf_counter() - started
+                content = [(sample.get("phase", args.layer), sample["actions"], sample["logprob"], sample["reward"])
+                           for sample in buffer.samples]
+                content.append([{key: value for key, value in record.items() if key != "measured_allocation_seconds"}
+                                for record in records])
+                digest = hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
+                if expected is None:
+                    expected = digest
+                if expected != digest:
+                    raise AssertionError("Worker count changed sampled actions/probabilities/rewards")
+                if repeat:
+                    durations.append(elapsed)
+                print(json.dumps(dict(workers=workers, repeat=repeat, cold=repeat == 0,
+                    seconds=elapsed, slots=len(records), events=len(buffer.samples), digest=digest,
+                    timing=trainer.collection_timings)), flush=True)
+                del buffer, records, content
         finally:
             trainer.close()
+        results.append(dict(workers=workers, seconds=durations, median_seconds=statistics.median(durations)))
+    print(json.dumps(dict(summary=results, selected=min(results, key=lambda row: row["median_seconds"]),
+        checkpoint_role="frozen diagnostic weights, not resumed training")), flush=True)
 
 
 if __name__ == "__main__":

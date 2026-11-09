@@ -3,6 +3,7 @@ import json
 import math
 from pathlib import Path
 import numpy as np
+from .buffers import normalize_advantages
 
 
 def close(actual, expected, name, atol=2e-5):
@@ -16,8 +17,7 @@ def rollout_diagnostics(buffer, settings):
         raise ValueError("Cannot describe an empty rollout")
     gamma = settings["gamma"]
     advantages, targets = buffer.advantages(gamma, settings["gae_lambda"])
-    normalized = ((advantages - advantages.mean()) / max(advantages.std(), 1e-8)
-                  if len(samples) > 1 else advantages.copy())
+    normalized = normalize_advantages(advantages, samples, settings.get("advantage_normalization", "global"))
     segment_returns = np.zeros(len(samples), dtype=np.float64)
     for index in reversed(range(len(samples))):
         sample = samples[index]
@@ -58,6 +58,21 @@ def rollout_diagnostics(buffer, settings):
                      (not sample["terminated"]) - sample["value"],
             advantage=float(advantages[index]), normalized_advantage=float(normalized[index]),
             gae_value_target=float(targets[index]), segment_return_with_bootstrap=float(segment_returns[index])))
+    learning_signal = {}
+    for phase in sorted({sample.get("phase", buffer.layer) for sample in samples}):
+        selected = np.asarray([sample.get("phase", buffer.layer) == phase for sample in samples])
+        slots = np.asarray([sample.get("slot", 0) for sample in samples])[selected]
+        signal = advantages[selected]
+        values = np.asarray([sample["value"] for sample in samples])[selected]
+        phase_targets = targets[selected]
+        learning_signal[phase] = dict(advantage_mean=float(signal.mean()), advantage_std=float(signal.std()),
+            normalized_mean=float(normalized[selected].mean()), normalized_std=float(normalized[selected].std()),
+            positive_fraction=float((signal > 0).mean()),
+            advantage_slot_correlation=float(np.corrcoef(signal, slots)[0, 1])
+                if signal.std() > 1e-12 and slots.std() > 1e-12 else None,
+            pre_update_explained_variance=float(1 - np.var(phase_targets - values) / np.var(phase_targets))
+                if np.var(phase_targets) > 1e-12 else None,
+            mean_decisions=float(np.mean([len(sample["steps"]) for sample, keep in zip(samples, selected) if keep])))
     return dict(transitions=len(samples), physical_slots=sum(sample["duration"] for sample in samples),
         episode_segments=len({sample.get("episode_id") for sample in samples}),
         terminated=sum(sample["terminated"] for sample in samples),
@@ -70,7 +85,7 @@ def rollout_diagnostics(buffer, settings):
         behavior_version=buffer.behavior_version, opponent_version=buffer.opponent_version,
         advantage_mean=float(advantages.mean()), advantage_std=float(advantages.std()),
         normalized_advantage_mean=float(normalized.mean()), normalized_advantage_std=float(normalized.std()),
-        examples=examples)
+        learning_signal=learning_signal, examples=examples)
 
 
 def policy_input_diagnostics(policy, samples, limit=16):
@@ -166,8 +181,14 @@ def check_update(samples, audit):
     returns = np.asarray(targets) + [sample["value"] for sample in samples]
     close(audit["returns"], returns, "returns")
     normalized = np.asarray(targets)
-    if len(normalized) > 1:
-        normalized = (normalized - normalized.mean()) / max(normalized.std(), 1e-8)
+    groups = {}
+    for index, sample in enumerate(samples):
+        key = sample.get("phase", "single") if settings.get("advantage_normalization", "global") == "phase" else "all"
+        groups.setdefault(key, []).append(index)
+    for indices in groups.values():
+        if len(indices) > 1:
+            values = normalized[indices]
+            normalized[indices] = (values - values.mean()) / max(values.std(), 1e-8)
     close(audit["normalized_advantages"], normalized, "normalized advantages")
     for batch in audit["minibatches"]:
         indices = batch["indices"]

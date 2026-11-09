@@ -2,6 +2,21 @@
 import numpy as np
 
 
+def normalize_advantages(advantages, samples, mode="global"):
+    if mode not in ("global", "phase"):
+        raise ValueError("Invalid advantage normalization")
+    result = np.asarray(advantages, dtype=np.float64).copy()
+    if len(result) != len(samples):
+        raise ValueError("Advantage/sample count mismatch")
+    groups = np.asarray([sample.get("phase", "single") for sample in samples]) if mode == "phase" else np.zeros(len(samples))
+    for group in np.unique(groups):
+        selected = groups == group
+        values = result[selected]
+        if len(values) > 1:
+            result[selected] = (values - values.mean()) / max(values.std(), 1e-8)
+    return result
+
+
 class RolloutBuffer:
     def __init__(self, layer, behavior_version, opponent_version):
         self.layer = layer

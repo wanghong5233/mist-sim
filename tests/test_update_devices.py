@@ -41,11 +41,12 @@ def test_rollout_float_views_share_one_backing_tensor(config):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
-def test_full_cuda_update_matches_cpu_and_returns_optimizer(config, tmp_path):
+@pytest.mark.parametrize("normalization", ["global", "phase"])
+def test_full_cuda_update_matches_cpu_and_returns_optimizer(config, tmp_path, normalization):
     config["method"] = "joint_ppo"
     config["k"] = 1
     config["reward_normalization"]["enabled"] = True
-    config["ppo"].update(epochs=1, minibatch=4, target_kl=100.)
+    config["ppo"].update(epochs=1, minibatch=4, target_kl=100., advantage_normalization=normalization)
     trainer = Trainer(config, 31)
     trainer.calibrate()
     buffer, _ = trainer.collect("joint", 6)

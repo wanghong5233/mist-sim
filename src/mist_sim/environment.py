@@ -107,13 +107,13 @@ def candidates(config, profiles, request, ready):
 
 
 class PublicProblem:
-    def __init__(self, config, public, active, ready, slot, history):
+    def __init__(self, config, public, active, ready, slot, history, profiles=None):
         self.config = config
         self.public = copy.deepcopy(public)
         self.active, self.ready = list(active), list(ready)
         self.slot = slot
         self.history = copy.deepcopy(history)
-        profiles = Profiles(config)
+        profiles = Profiles(config) if profiles is None else profiles
         self.choices = [candidates(config, profiles, item, ready) for item in self.public]
 
     def empty_usage(self):
@@ -246,7 +246,8 @@ class Environment:
         ready = [old * new for old, new in zip(previous, active)]
         public = publish(self._trace[self.slot], self.config, self.config["information"])
         problem = PublicProblem(self.config, public, active, ready, self.slot,
-                                self.history[-self.config["history_slots"]:] if self.config["long_term_feedback"] else [])
+                                self.history[-self.config["history_slots"]:] if self.config["long_term_feedback"] else [],
+                                profiles=self.profiles)
         self._pending = (previous, problem)
         return problem
 

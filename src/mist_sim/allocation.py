@@ -20,21 +20,35 @@ def solve_p3(alpha, beta, minimum, capacity, tolerance=1e-10):
 
     def rates(multiplier):
         lower, upper = minimum.copy(), unconstrained.copy()
+        current = upper.copy()
+        clamped = 2 * alpha * minimum - beta / minimum ** 2 + multiplier >= 0
         for _ in range(55):
-            middle = (lower + upper) / 2
-            derivative = 2 * alpha * middle - beta / middle ** 2 + multiplier
-            lower = np.where(derivative < 0, middle, lower)
-            upper = np.where(derivative >= 0, middle, upper)
-        return np.maximum(minimum, (lower + upper) / 2)
+            derivative = 2 * alpha * current - beta / current ** 2 + multiplier
+            scale = 2 * alpha * current + beta / current ** 2 + multiplier
+            converged = clamped | (np.abs(derivative) <= 1e-13 * scale)
+            if np.all(converged):
+                return np.where(clamped, minimum, current)
+            lower = np.where((derivative < 0) & ~converged, current, lower)
+            upper = np.where((derivative >= 0) & ~converged, current, upper)
+            proposal = current - derivative / (2 * alpha + 2 * beta / current ** 3)
+            proposal = np.where((proposal > lower) & (proposal < upper), proposal, (lower + upper) / 2)
+            current = np.where(converged, current, proposal)
+        return np.where(clamped, minimum, current)
 
     low, high = 0.0, float(np.max(np.maximum(0, beta / minimum ** 2 - 2 * alpha * minimum))) + 1
+    feasible = minimum.copy()
     for _ in range(65):
         middle = (low + high) / 2
-        if rates(middle).sum() > capacity:
+        trial = rates(middle)
+        total = trial.sum()
+        if total > capacity:
             low = middle
         else:
             high = middle
-    return rates(high)
+            feasible = trial
+            if capacity - total <= tolerance:
+                break
+    return feasible
 
 
 def project_rates(predicted, minimum, capacity):

@@ -1,0 +1,4 @@
+{
+  "method": "joint_ppo",
+  "ppo": {"advantage_normalization": "phase"}
+}

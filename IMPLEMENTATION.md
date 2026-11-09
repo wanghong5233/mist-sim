@@ -66,7 +66,7 @@ PPO的critic目标是**GAE lambda-return `A+V_old`**，不是完整Monte Carlo�
 
 `joint_ppo`是可切换的训练机制对照：不改变环境、状态字段、匿名边界、容量掩码或P3。`training_joint.py`按`upper`服务器事件（duration=0、即时奖励0）与`lower`物理槽事件（duration=1、完整负成本）构造同一个EventRolloutBuffer；开关读取当前请求发布前的信息，调度读取开关后发布的当前公开批次，时间仅由执行物理槽推进。每个episode的首事件是开关，随后每Q槽插入一次开关。历史不足或空请求不会删掉物理奖励/critic样本。
 
-JointPolicy包装原有两套SetPolicy作为phase条件分支，不增加可见信息或参数数量；两类actor评分仍为270→64→64→1，critic135→64→64→1。批量重放按phase分组，复用RolloutTensors与原动作前缀/掩码，再把结果放回原batch顺序；不是对整条轨迹概率相乘。一个联合Adam更新两分支，首次联合更新显式复制预训练调度Adam状态。两个actor共同裁剪、两个critic共同裁剪；标准化优势在整个事件rollout计算一次。
+JointPolicy包装原有两套SetPolicy作为phase条件分支，不增加可见信息或参数数量；两类actor评分仍为270→64→64→1，critic135→64→64→1。批量重放按phase分组，复用RolloutTensors与原动作前缀/掩码，再把结果放回原batch顺序；不是对整条轨迹概率相乘。一个联合Adam更新两分支，首次联合更新显式复制预训练调度Adam状态。两个actor共同裁剪、两个critic共同裁剪。ppo.advantage_normalization默认为global，对整个事件rollout共同标准化；phase选项按开关/调度分别计算均值与标准差，单元素组保留原值。统计均在更新前计算一次，多个epoch不重算；原始GAE和critic的lambda-return目标保持不变。phase消除组件优势的整体偏移与尺度差异，同时改变组件间相对策略梯度权重；不等于额外奖励、等权loss或收敛保证。joint_phase_normalized.json提供独立对照预设，dry-run显式显示该选择。
 
 事件TD=`r+gamma^d*V(next_phase,next_obs)−V(old_phase,obs)`；GAE递推系数=`(gamma*lambda)^d`，开关零时长事件不增加折扣或lambda衰减，价值bootstrap跨phase。终止归零、截断bootstrap且不跨重置，行为快照包含两网络版本，使用后清空。采样至更新结束冻结归一化，每个真实物理reward只更新统计一次。PPO沿用公共clip损失/GAE/优势标准化/梯度裁剪，任一分支或整体KL超过阈值终止该批epoch，不结束整个训练。common ppo配置控制联合更新，冲突的层覆盖报错。
 
@@ -84,7 +84,7 @@ JointPolicy包装原有两套SetPolicy作为phase条件分支，不增加可见�
 
 ## 定位问题与外部参考
 
-collection.py通过spawn常驻8个进程采集独立episode，复用_collect_serial物理循环。每个任务加载同一组网络/归一化/版本快照，固定请求和动作种子；worker不更新参数或统计、不写正式日志。主进程按episode顺序合并，终止/截断边界保持，完成采样后才更新PPO和运行统计；下一阶段发送新快照。池不进入检查点，run的finally关闭，直接collect调用者需close。工作稿交替冻结规定解释当前实现来源，不证明该训练设计比同轨迹联合更新更优。
+collection.py通过spawn常驻runtime.collection_workers个进程采集独立episode，复用_collect_serial物理循环；conditional基础配置为8，cuda_update覆盖为4。每个任务加载同一组网络/归一化/版本快照，固定请求和动作种子；worker不更新参数或统计、不写正式日志。主进程按episode顺序合并，终止/截断边界保持，完成采样后才更新PPO和运行统计；下一阶段发送新快照。池不进入检查点，run的finally关闭，直接collect调用者需close。工作稿交替冻结规定解释当前实现来源，不证明该训练设计比同轨迹联合更新更优。
 
 效率检查边界：候选生成只在单个请求调用内复用与服务器无关的切分剖面，不做跨配置持久缓存；执行只检查选中候选，按服务器一次分组，空组跳过P3；贪心复用已知当前成本，仍比较完整P3增量成本。文件哈希以1MiB分块读取，避免把整份轨迹装入内存。`tests/test_static_efficiency.py`以调用次数、动作一致性和哈希检查这些性质，不以墙钟阈值作为测试。
 
@@ -96,9 +96,11 @@ behavior采用`mist.behavior.shared.v1`共享frame/特征组格式，避免重�
 
 PPO更新通过`policies/batching.py`执行小批张量前向/反向：按候选→请求→状态分段池化、按指派绑定服务器，随后批量计算掩码概率并沿原前缀汇总。空任务只更新critic，Fixed-Window连续速率密度保留。逐样本replay作独立测试参照。采样保留物理时序与资源前缀依赖，单次no_grad动作内复用不变的请求编码，跨参数更新不缓存激活。上层前缀共享只读请求/候选，改变服务器行；校准统计按共享输入去重，避免多前缀重复加权。
 
-每个epoch的loss/熵/clip等按实际小批样本数加权，尾批不与满批等权；gradient_after_clip_max始终取本次更新全部小批的最大联合梯度范数，不依赖详细审计开关。actor/critic分别裁剪，联合范数上界为sqrt(2)×max_grad_norm。KL另在epoch后对全部rollout分块批量重算，不计算无用critic。更新前概率复核也走同一批量路径。`metrics.jsonl`单列diagnostics_seconds、trace_write_seconds、probability_check_seconds及update_timings（前向/loss、反向/step、KL），不把阶段剩余时间冒称磁盘写入。轨迹JSON不缩进，完整数值和独立复算接口保持不变。
+每个epoch的loss/熵/clip等按实际小批样本数加权，尾批不与满批等权；gradient_after_clip_max始终取本次更新全部小批的最大联合梯度范数，不依赖详细审计开关。actor/critic分别裁剪，联合范数上界为sqrt(2)×max_grad_norm。KL另在epoch后对全部rollout分块批量重算，不计算无用critic。更新前概率复核也走同一批量路径。`metrics.jsonl`单列diagnostics_seconds、trace_write_seconds、probability_check_seconds及update_timings（前向/loss、反向/step、KL），不把阶段剩余时间冒称磁盘写入。rollout.learning_signal分组件记录更新前优势均值/标准差/正值比例、与时隙位置的相关性和价值解释方差；训练后的critic拟合不能证明策略收益改善。轨迹JSON不缩进，完整数值和独立复算接口保持不变。
 
-device=cpu/cuda只选择PPO更新设备。环境、P3、匿名发布、8个采样worker、GAE及优势统计均在CPU；worker强制device=cpu，不创建CUDA更新器。devices.update_device在每次完整update入口移动策略/Adam矩，在finally回CPU，参数对象身份不变；Adam step计数保持CPU。保存和恢复均以CPU权重/优化器为边界，同源码允许只覆盖device，仍严格检查其余配置及输入。CUDA缺失报错，不静默退回CPU；OOM/异常也恢复CPU后由原失败路径保存诊断快照。
+采样请求编码命中缓存时不再重建整组候选张量；梯度更新仍重算激活。环境逐槽复用已验证Profiles，区间剖面界使用对象内有界缓存并返回独立字典。主进程为溯源生成的轨迹传给worker，避免重复生成；无store的诊断仍由worker生成。P3内层为单调区间保护的Newton迭代，外层维持对偶二分，只在可行侧达到容量容差时提前结束。collection_timing区分准备、进程池等待、每条轨迹CPU/墙钟/P3耗时及返回等待；后者含序列化、传输、反序列化和主进程调度，不称作纯通信时间。进程数通过同快照、同轨迹的重复暖池测量选择，不自动修改正在运行的配置。
+
+device=cpu/cuda只选择PPO更新设备。环境、P3、匿名发布、采样worker、GAE及优势统计均在CPU；worker强制device=cpu，不创建CUDA更新器。devices.update_device在每次完整update入口移动策略/Adam矩，在finally回CPU，参数对象身份不变；Adam step计数保持CPU。保存和恢复均以CPU权重/优化器为边界，同源码允许只覆盖device，仍严格检查其余配置及输入。CUDA缺失报错，不静默退回CPU；OOM/异常也恢复CPU后由原失败路径保存诊断快照。
 
 RolloutTensors按float32/int64/bool打包整批输入，各一块连续存储；所有视图共享底层张量。PPO旧概率/优势/目标/有效标记另外合成一块float32上传，完整epoch和KL复核复用这些原始张量，梯度所需激活逐步重算。目标服务器、已指派任务和剩余资源也复用GPU缓存；小批分组/索引元数据仍由CPU构建并传入，不把rollout_tensor_transfers=4误称全部CUDA传输仅4次。不会逐时隙、逐epoch搬运大块状态，也不在正常更新中逐批empty_cache。device_metrics报告模型搬入/回传、完整更新耗时与峰值allocated/reserved显存；input_pack_transfer_seconds包含CPU整理和上传，计时不是纯PCIe带宽。
 

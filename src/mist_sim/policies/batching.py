@@ -101,8 +101,6 @@ def encode_frames(policy, frames, critic=False, cache=None, with_servers=False, 
             group_lengths.append(lengths)
             item_server_groups.append(frame.get("item_servers", [[0.] * 13] * len(frame["items"])))
         inverse.append(seen[identity])
-    values = (torch.cat([cache.rows(rows) for rows in unique]) if cache is not None else
-              tensor(policy, [row for rows in unique for row in rows]).reshape(-1, 19))
     lengths = np.asarray([length for group in group_lengths for length in group], dtype=int)
     cache_key = (critic, tuple(seen))
     if request_cache is not None and torch.is_grad_enabled():
@@ -110,6 +108,8 @@ def encode_frames(policy, frames, critic=False, cache=None, with_servers=False, 
     if request_cache is not None and cache_key in request_cache:
         request_values = request_cache[cache_key]
     else:
+        values = (torch.cat([cache.rows(rows) for rows in unique]) if cache is not None else
+                  tensor(policy, [row for rows in unique for row in rows]).reshape(-1, 19))
         request_values = values.new_zeros((len(lengths), hidden))
         if len(values):
             owners = tensor(policy, np.repeat(np.arange(len(lengths)), lengths), torch.long)
@@ -136,7 +136,7 @@ def encode_frames(policy, frames, critic=False, cache=None, with_servers=False, 
             if valid:
                 request_indices.append(int(offsets[source] + request_index))
                 request_owners.append(frame_index)
-    request_pool = values.new_zeros((len(frames), hidden))
+    request_pool = request_values.new_zeros((len(frames), hidden))
     if request_indices:
         owner_ids = tensor(policy, request_owners, torch.long)
         request_pool = request_pool.index_add(0, owner_ids, request_values[tensor(policy, request_indices, torch.long)])
@@ -152,15 +152,15 @@ def encode_frames(policy, frames, critic=False, cache=None, with_servers=False, 
             raise ValueError("Invalid server assignment")
         allocated_rows.extend(rows)
         allocated_owners.extend(int(server_offsets[frame_index] + owner) for owner in owners)
-    allocated_pool = values.new_zeros((len(server_rows), hidden))
-    allocated_count = values.new_zeros(len(server_rows))
+    allocated_pool = request_values.new_zeros((len(server_rows), hidden))
+    allocated_count = request_values.new_zeros(len(server_rows))
     if allocated_rows:
         owner_ids = tensor(policy, allocated_owners, torch.long)
         allocated_tensor = (torch.cat([cache.rows(frame["allocated"]) for frame in frames if frame.get("allocated")])
                             if cache is not None else tensor(policy, allocated_rows))
         encoded = item_encoder(policy.item_norm(allocated_tensor))
         allocated_pool = allocated_pool.index_add(0, owner_ids, encoded)
-        allocated_count = torch.bincount(owner_ids, minlength=len(server_rows)).to(values.dtype)
+        allocated_count = torch.bincount(owner_ids, minlength=len(server_rows)).to(request_values.dtype)
         allocated_pool = allocated_pool / allocated_count.clamp(min=1)[:, None]
     remaining = (torch.cat([cache.frames[id(frame)]["remaining"] for frame in frames]) if cache is not None else
                  tensor(policy, [row for frame in frames for row in
@@ -169,7 +169,7 @@ def encode_frames(policy, frames, critic=False, cache=None, with_servers=False, 
     servers = resource_encoder(torch.cat((server_encoder(policy.server_norm(server_rows)), allocated_pool,
                                          remaining, allocated_count.log1p()[:, None]), dim=1))
     server_owners = tensor(policy, np.repeat(np.arange(len(frames)), server_lengths), torch.long)
-    server_pool = values.new_zeros((len(frames), hidden)).index_add(0, server_owners, servers)
+    server_pool = request_values.new_zeros((len(frames), hidden)).index_add(0, server_owners, servers)
     server_pool = server_pool / tensor(policy, np.maximum(server_lengths, 1))[:, None]
     context = policy.context_norm(torch.cat([cache.rows(frame["context"]) for frame in frames])
                                   if cache is not None else tensor(policy, [frame["context"] for frame in frames]))

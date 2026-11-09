@@ -3,6 +3,7 @@ from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 import copy
 import multiprocessing
 import random
+import time
 
 import numpy as np
 import torch
@@ -18,7 +19,7 @@ def initialize_collector(config, seed, stop):
     collector.collection_stop = stop
 
 
-def collect_episode(state, normalization, versions, trace_index, layer, count, pretrain, deadline):
+def collect_episode(state, normalization, versions, trace_index, layer, count, pretrain, deadline, trace=None):
     collector.controller.load_state_dict({layer_name: {name: torch.from_numpy(value) for name, value in tensors.items()}
                                           for layer_name, tensors in state.items()})
     collector.reward_normalizer.load_state_dict(normalization)
@@ -27,12 +28,24 @@ def collect_episode(state, normalization, versions, trace_index, layer, count, p
     collector.total_slots = 0
     collector.training_episodes = 0
     collector.deadline = deadline
+    collector.collection_trace = trace
     action_seed = (collector.seed + 10000 * trace_index + 7919) % (2 ** 32)
     torch.manual_seed(action_seed)
     random.seed(action_seed)
     np.random.seed(action_seed)
     buffer, records = collector._collect_serial(layer, count, pretrain)
     return buffer.samples, records
+
+
+def timed_episode(*args):
+    started = time.perf_counter()
+    cpu_started = time.process_time()
+    samples, records = collect_episode(*args)
+    timing = dict(worker_seconds=time.perf_counter() - started,
+                  worker_cpu_seconds=time.process_time() - cpu_started,
+                  allocation_seconds=sum(record["measured_allocation_seconds"] for record in records),
+                  finished_at=time.perf_counter())
+    return samples, records, timing
 
 
 class EpisodeCollectors:
@@ -42,21 +55,26 @@ class EpisodeCollectors:
         self.pool = ProcessPoolExecutor(max_workers=workers, mp_context=context,
             initializer=initialize_collector, initargs=(config, seed, self.stop))
 
-    def collect(self, trainer, jobs, layer, pretrain):
+    def collect(self, trainer, jobs, layer, pretrain, traces=None):
+        started = time.perf_counter()
         state = {layer_name: {name: tensor.detach().cpu().numpy().copy() for name, tensor in tensors.items()}
                  for layer_name, tensors in trainer.controller.state_dict().items()}
         normalization = trainer.reward_normalizer.state_dict()
-        futures = {self.pool.submit(collect_episode, state, normalization, dict(trainer.versions),
-                                    trace_index, layer, count, pretrain, trainer.deadline): index
+        futures = {self.pool.submit(timed_episode, state, normalization, dict(trainer.versions),
+                                    trace_index, layer, count, pretrain, trainer.deadline,
+                                    (traces or {}).get(trace_index)): index
                    for index, (trace_index, count) in enumerate(jobs)}
         pending, outputs = set(futures), {}
         samples_done, slots_done = 0, 0
+        timings = {}
         try:
             while pending:
                 trainer.check_budget()
                 finished, pending = wait(pending, timeout=.1, return_when=FIRST_COMPLETED)
                 for future in finished:
-                    samples, records = future.result()
+                    samples, records, timing = future.result()
+                    timing["return_seconds"] = time.perf_counter() - timing.pop("finished_at")
+                    timings[futures[future]] = timing
                     outputs[futures[future]] = samples, records
                     samples_done += len(records) if layer == "joint" else len(samples)
                     slots_done += len(records)
@@ -67,6 +85,8 @@ class EpisodeCollectors:
             for future in futures:
                 future.cancel()
             raise
+        trainer.collection_timings = dict(pool_seconds=time.perf_counter() - started,
+            jobs=[dict(trace_index=jobs[index][0], **timings[index]) for index in range(len(jobs))])
         return [outputs[index] for index in range(len(jobs))]
 
     def close(self):
