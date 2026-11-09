@@ -115,9 +115,9 @@ mist-sim/
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --overlay configs/algorithms/cuda_update.json --overlay configs/algorithms/hpgi_finite_horizon.json --overlay configs/training/fixed_200.json --overlay configs/runtime/windows_performance.json --seed 4200001
 ```
 
-fixed_200将完整iteration预算设为200，并把早停资格起点设为200，确保不会在200之前因稳定退出；其他配置仍保留原稳定早停行为。200轮HPGI为8192预训练＋200×2048=417792训练时隙，校准另计；与Joint相同轮数不等于相同交互预算。旧199点结果保持真实记录，不复制终值补点。
+fixed_200将完整iteration预算设为200，并把早停资格起点设为200，确保不会在200之前因稳定退出；后续学习方法的收敛曲线对比统一叠加该预设。其他配置仍保留原稳定早停行为。200轮HPGI为8192预训练＋200×2048=417792训练时隙，校准另计；与Joint相同轮数不等于相同交互预算。旧199点结果保持真实记录，不复制终值补点。
 
-windows_performance仅在Windows显式启用：主进程及每个采样worker各自设置AboveNormal优先级，并通过SetProcessInformation关闭EXECUTION_SPEED节能（HighQoS），随后读取实际状态确认；无需管理员，不改全局电源计划。主进程状态在process_policy.json，worker状态在metrics.jsonl的collection_timing.jobs[*].process_policy；终端前后台均保持这些进程设置，但不能保证消除其他负载/温控造成的波动。平台不支持或设置失败时明确报错；不启用该overlay时不改变OS调度。机制依据：[微软QoS](https://learn.microsoft.com/en-us/windows/win32/procthread/quality-of-service)、[进程API](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-setprocessinformation)。
+windows_performance仅在Windows显式启用：主进程及每个采样worker各自设置AboveNormal优先级，并通过SetProcessInformation关闭EXECUTION_SPEED节能（HighQoS），随后读取实际状态确认；无需管理员，不改全局电源计划。主进程状态在process_policy.json，worker状态在progress.jsonl的collection_timing事件jobs[*].process_policy；终端前后台均保持这些进程设置，但不能保证消除其他负载/温控造成的波动。平台不支持或设置失败时明确报错；不启用该overlay时不改变OS调度。机制依据：[微软QoS](https://learn.microsoft.com/en-us/windows/win32/procthread/quality-of-service)、[进程API](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-setprocessinformation)。
 
 其余学习基线复用同一train入口，通过--method选择表中方法；CPU采样、进程池、CUDA更新、整批张量缓存及诊断间隔均共用。单层方法只打印实际更新的组件。示例：
 
