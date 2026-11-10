@@ -129,7 +129,9 @@ windows_performance仅在Windows显式启用：主进程及每个采样worker各
 
 其余学习基线复用同一train入口，通过--method选择表中方法；CPU采样、进程池、CUDA更新、整批张量缓存及诊断间隔均共用。单层方法只打印实际更新的组件。示例：
 
-Fixed-Split正式入口包含开发选点与独立PPO训练。先运行`python -m scripts.evaluation.select_fixed_split --suite data/processed/development/fixed-split-v1 --run-id select-fixed-split-v1`，穷举各模型合法点的全部组合，在相同开发输入与固定因果控制器下按原目标成本选择；不是保证所有可能学习策略下全局最优。随后运行`python -m scripts.training.train_fixed_split --selection-run select-fixed-split-v1 --suite data/processed/development/fixed-split-v1 --run-id train-fixed-split-selected-v1`，等待选择成功、校验输入/选择哈希、冻结逐模型切分，从头训练300轮；可重复传`--wait-run 运行ID`，等其中一项300轮训练退出后再打开可见终端。旧3/3/7仅为入口示例，不是选择依据，旧固定点权重不能直接沿用为重新选择后的结果。完整候选/排序/overlay归选择运行results，后续训练另存同名results/logs。
+Fixed-Split正式入口包含一次离线开发选点与独立PPO训练。先运行`python -m scripts.evaluation.select_fixed_split --suite data/processed/development/fixed-split-v1 --run-id select-fixed-split-v1`，穷举各模型合法点的全部组合，在相同开发输入与固定因果控制器下按原目标成本选择；不保证所有可能学习策略下全局最优。结果`results/<选择ID>/selected_overlay.json`作为该场景的固定配置，后续不同训练种子/轮数复用，不逐次重选。随后运行`python -m scripts.training.train_fixed_split --selection-run select-fixed-split-v1 --suite data/processed/development/fixed-split-v1 --run-id train-fixed-split-selected-v1`，等待选择成功、校验输入/选择哈希、冻结逐模型切分，从头训练300轮；再次训练使用同一选择ID、新训练ID及`--seed`即可，可重复传`--wait-run 运行ID`等待其中一项300轮训练退出后再开可见终端。旧3/3/7仅为入口示例，旧权重不能直接沿用为重新选择后的结果。完整候选/排序/overlay归选择运行results，后续训练另存同名results/logs。
+
+固定点适用于选点时的模型剖面、物理场景和目标权重。后续改变设备算力、内存、带宽、负载分布或成本权重做敏感性实验时，应在新场景的开发输入上重新选点、另存配置，再训练和评价；`train_fixed_split.py`会拒用与开发场景不一致的选择。不根据最终测试结果调整切分点；若专门考察原固定点的跨场景泛化，则明确标为冻结迁移对照。
 
 ```powershell
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --overlay configs/algorithms/cuda_update.json --method fixed_split --set ppo_layers.upper.minibatch=64 --dry-run

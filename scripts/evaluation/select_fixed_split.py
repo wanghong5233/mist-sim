@@ -2,6 +2,12 @@
 
 This is controller-based hyperparameter selection, not a certificate of the best
 possible trained Fixed-Split policy. No HPGI scores or final test inputs are read.
+
+Run selection once per physical scenario/objective/model-profile configuration,
+then reuse the exported cuts across PPO runs and training seeds. The best cut is
+not a property of the DNN alone: capacity, bandwidth, workload and cost weights
+affect it. A sensitivity experiment changing these inputs needs its own offline
+selection on development workloads, before training or test results are seen.
 """
 import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed

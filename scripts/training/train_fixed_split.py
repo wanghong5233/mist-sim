@@ -49,6 +49,10 @@ def selected_training_config(root, selection_run, suite, seed):
     expected = candidate_cuts(config)
     if selection["candidates"] != expected or len(selection["ranking"]) != len(expected):
         raise ValueError("Incomplete or incompatible cut search")
+    # Frozen cuts are reused across training seeds, budgets and PPO CPU/GPU use.
+    # Physical sensitivity experiments (capacity/bandwidth/workload/objective or
+    # model profiles) require a new development selection for that scenario.
+    # Reject stale cuts rather than silently treating them as scenario-optimal.
     # Check physical scenario/target independently of training/runtime settings.
     from scripts.evaluation.evaluate_greedy import scenario
     if read_json(suite / "manifest.json")["scenario"] != scenario(config):
