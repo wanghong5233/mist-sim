@@ -1,0 +1,4 @@
+{
+  "training": {"cycles": 300},
+  "convergence": {"min_cycles": 200}
+}
