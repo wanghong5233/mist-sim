@@ -74,6 +74,8 @@ def test_full_cuda_update_matches_cpu_and_returns_optimizer(config, tmp_path, no
     assert actual["loss"] == pytest.approx(expected["loss"], abs=1e-5)
     assert actual["rollout_tensor_transfers"] == 4
     assert actual["device_metrics"]["peak_allocated_mib"] > 0
+    assert actual["device_metrics"]["idle_reserved_mib"] < actual["device_metrics"]["peak_reserved_mib"]
+    assert actual["device_metrics"]["gpu_slot_wait_seconds"] >= 0
     assert next(accelerated.joint_policy.parameters()).device.type == "cpu"
     for state in accelerated.optimizers["joint"].state.values():
         assert all(value.device.type == "cpu" for value in state.values() if isinstance(value, torch.Tensor))

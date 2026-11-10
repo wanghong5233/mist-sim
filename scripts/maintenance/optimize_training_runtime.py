@@ -67,6 +67,9 @@ def check_original_hashes(originals, recorded):
 def verify_selection_compatibility(root, recorded, current, receipt):
     require(receipt is not None, "Simulator source changed after cut selection")
     proof = json.loads(Path(receipt).read_text(encoding="utf-8"))
+    if proof.get("kind") == "reviewed_watchdog_recovery":
+        from scripts.maintenance.recover_watchdog import verify_selection_compatibility as verify
+        return verify(root, recorded, current, receipt)
     require(proof["kind"] == "reviewed_runtime_optimization", "Invalid compatibility receipt")
     check_original_hashes(reviewed_source(root), recorded)
     require(proof["original_source"] == recorded and proof["current_source"] == current,
@@ -145,6 +148,8 @@ def combine_curve(root, recovery, continuation):
     require(digest_file(recovery / "resume.pt") == proof["checkpoint_sha256"], "Recovery checkpoint changed")
     require(digest_file(recovery / "cycles_prefix.csv") == proof["prefix_csv_sha256"], "Curve prefix changed")
     require(digest_file(Path(proof["original_csv"])) == proof["original_csv_sha256"], "Original curve changed")
+    for source in proof.get("sources", []):
+        require(digest_file(Path(source["path"])) == source["sha256"], "Earlier curve source changed")
     sources = [recovery / "cycles_prefix.csv", root / "results" / continuation / "cycles.csv"]
     rows, fields = [], None
     for path in sources:

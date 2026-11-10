@@ -124,6 +124,8 @@ PPO更新通过`policies/batching.py`执行小批张量前向/反向：按候选
 
 device=cpu/cuda只选择PPO更新设备。环境、P3、匿名发布、采样worker、GAE及优势统计均在CPU；worker强制device=cpu，不创建CUDA更新器。devices.update_device在每次完整update入口移动策略/Adam矩，在finally回CPU，参数对象身份不变；Adam step计数保持CPU。保存和恢复均以CPU权重/优化器为边界，同源码允许只覆盖device，仍严格检查其余配置及输入。CUDA缺失报错，不静默退回CPU；OOM/异常也恢复CPU后由原失败路径保存诊断快照。
 
+Windows同会话的CUDA更新通过内核命名互斥量轮流执行；CPU采样仍可并行，等待时间单列gpu_slot_wait_seconds。锁覆盖模型搬入、PPO及回CPU后的缓存清理；进程意外退出后内核释放所有权，后续可接管。每次完整更新只在末尾empty_cache一次，释放闲置allocator缓存，不逐minibatch清理；idle_reserved_mib记录清理后预留量。此措施降低多训练资源峰值，不能据此宣称修复Windows蓝屏。
+
 RolloutTensors按float32/int64/bool打包整批输入，各一块连续存储；所有视图共享底层张量。PPO旧概率/优势/目标/有效标记另外合成一块float32上传，完整epoch和KL复核复用这些原始张量，梯度所需激活逐步重算。目标服务器、已指派任务和剩余资源也复用GPU缓存；小批分组/索引元数据仍由CPU构建并传入，不把rollout_tensor_transfers=4误称全部CUDA传输仅4次。不会逐时隙、逐epoch搬运大块状态，也不在正常更新中逐批empty_cache。device_metrics报告模型搬入/回传、完整更新耗时与峰值allocated/reserved显存；input_pack_transfer_seconds包含CPU整理和上传，计时不是纯PCIe带宽。
 
 `runtime.torch_threads`可配置CPU算子线程数，默认1；小网络串行采样与批量更新对线程数的收益不同，需按整条链路实测。`scripts/validation/benchmark_batching.py`测CPU串行/批量路径；benchmark_update_device.py的--full-rollout在同一真实buffer及权重/Adam快照下比较CPU64和CUDA64/128/256，含搬运/KL/回传，为等5epoch计时仅在探针中放宽KL阈值。--snapshot-only显式导入旧完成快照仅作独立性能诊断，不恢复运行或写结果。CPU64/CUDA64为设备对照；128/256同时减少梯度步数，不能将全部收益归于硬件或宣称更易收敛。

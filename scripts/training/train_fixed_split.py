@@ -94,6 +94,7 @@ def main(argv=None):
     parser.add_argument("--wait-run", action="append", default=[])
     parser.add_argument("--seed", type=int, default=4200001)
     parser.add_argument("--source-compatibility", type=Path)
+    parser.add_argument("--normal-priority", action="store_true", help="Do not request AboveNormal/HighQoS")
     parser.add_argument("--poll-seconds", type=float, default=30)
     parser.add_argument("--max-hours", type=float, default=24)
     args = parser.parse_args(argv)
@@ -152,6 +153,8 @@ def main(argv=None):
                 raise RuntimeError("Cut selection failed; no PPO launched")
             time.sleep(args.poll_seconds)
         config, selection = selected_training_config(root, args.selection_run, suite, args.seed, args.source_compatibility)
+        if args.normal_priority:
+            config["runtime"]["windows_performance"] = False
         config_path = directory / "frozen_training.json"
         write_json(config_path, config)
         config_hash = digest_file(config_path)

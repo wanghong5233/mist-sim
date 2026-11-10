@@ -30,6 +30,7 @@
 |maintenance/|check_publish.py|推送前检查暂存文件和Git历史，不输出秘密内容，不访问远端|
 |maintenance/|catalog_runs.py|只读运行资产盘点|
 |maintenance/|optimize_training_runtime.py|限定2026-11-10已审计源码的4worker/关闭调试导出迁移，保留学习状态；正常结束后合并真实曲线前缀和续训段，旧文件不改|
+|maintenance/|python -m scripts.maintenance.recover_watchdog --run 运行ID --earlier 上次恢复目录 --output 新恢复目录|限定2026-11-11的GPU互斥/缓存清理源码及普通优先级迁移，保留学习状态；多次中断仍只拼接检查点之前的真实CSV，原始尾部保留。可生成Fixed-Split选点源码兼容凭据；不放宽Trainer.load|
 |maintenance/|archive_runs.ps1、restore_run.ps1|既有历史资产工具，按明确任务使用，不是测试产物默认流程|
 
 profile_models与export_profiles的持久输出在data/profiling，数值输入在data/processed。检查、诊断、维护脚本默认打印到终端；--output或--summary仅用于显式排障导出（放tmp，用完删除）。验证套件的报告、日志、CSV均位于系统临时空间，退出删除。正式训练/评价自动写results/<运行名>中的原始CSV；后续图表以CSV为输入，不能把results作为检查脚本默认落盘目录。
