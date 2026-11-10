@@ -1,0 +1,8 @@
+{
+  "method": "upper_ppo_greedy",
+  "ppo": {
+    "value_model": "finite_horizon",
+    "value_target": "sampled_return"
+  },
+  "training": {"slow_intervals": 512}
+}

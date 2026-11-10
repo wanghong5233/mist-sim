@@ -1,0 +1,9 @@
+{
+  "method": "single_timescale",
+  "window": 1,
+  "ppo": {
+    "value_model": "finite_horizon",
+    "value_target": "sampled_return"
+  },
+  "training": {"fast_slots": 1024, "slow_intervals": 1024}
+}
