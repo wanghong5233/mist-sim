@@ -11,7 +11,7 @@ def prepare(tmp_path, config):
     jobs = []
     for method in ("fixed_split", "fixed_window"):
         settings = for_method(copy.deepcopy(config), method)
-        settings["runtime"].update(collection_workers=4, windows_performance=False)
+        settings["runtime"].update(collection_workers=4, windows_performance=True)
         settings["training"]["cycles"] = 300
         path = tmp_path / f"{method}.json"
         write_json(path, settings)

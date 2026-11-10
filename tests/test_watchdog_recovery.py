@@ -41,7 +41,7 @@ def test_separate_process_waits_and_exception_releases_gpu_slot():
 
 
 @pytest.mark.parametrize("method", ["single_timescale", "upper_ppo_greedy"])
-def test_migration_changes_only_runtime_metadata(config, method):
+def test_migration_keeps_background_performance_and_learning_state(config, method):
     config = for_method(config, method)
     config["runtime"].update(collection_workers=4, windows_performance=True)
     config["diagnostics"]["phase_interval"] = 0
@@ -54,9 +54,8 @@ def test_migration_changes_only_runtime_metadata(config, method):
     result = migrate_payload(payload)
     for key in payload.keys() - {"config", "signature", "implementation_signature"}:
         assert result[key] is payload[key]
-    expected = copy.deepcopy(original)
-    expected["runtime"]["windows_performance"] = False
-    assert result["config"] == expected
+    assert result["config"] == original
+    assert result["config"]["runtime"]["windows_performance"] is True
     assert payload["config"] == original
     payload["resumable"] = False
     with pytest.raises(ValueError, match="Completed-stage"):

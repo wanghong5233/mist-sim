@@ -48,8 +48,8 @@ def execute(root, spec_path, queue_id, poll_seconds=30, max_hours=24):
             raise FileExistsError(job["run_id"])
         if config["method"] not in ("fixed_split", "fixed_window") or config["training"]["cycles"] != 300:
             raise ValueError("Queue is limited to the two pending 300-iteration baselines")
-        if config["runtime"]["windows_performance"] or config["runtime"]["collection_workers"] != 4:
-            raise ValueError("Expected ordinary-priority four-worker configuration")
+        if not config["runtime"]["windows_performance"] or config["runtime"]["collection_workers"] != 4:
+            raise ValueError("Expected background-performance four-worker configuration")
         if sha256(job["config"]) != job["config_sha256"]:
             raise ValueError("Frozen configuration changed")
     directory = root / "logs/queues" / queue_id
@@ -91,7 +91,6 @@ def execute(root, spec_path, queue_id, poll_seconds=30, max_hours=24):
                     from scripts.training.train_fixed_split import selected_training_config
                     selected, _ = selected_training_config(root, job["selection"], Path(job["suite"]),
                                                            job["seed"], Path(job["compatibility"]))
-                    selected["runtime"]["windows_performance"] = False
                     if selected != load_config(job["config"]):
                         raise RuntimeError("Frozen Fixed-Split selection changed")
                 receipt = directory / f"{job['run_id']}-exit.json"

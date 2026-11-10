@@ -1,6 +1,6 @@
 """Audited recovery of the 2026-11-11 Windows 0x101 interruption.
 
-Only GPU scheduling/cache lifetime and ordinary Windows scheduling change.
+Only GPU scheduling/cache lifetime changes; keep background performance enabled.
 Learning tensors, optimizer state, input counters and RNG remain untouched.
 """
 import argparse
@@ -56,7 +56,6 @@ def migrate_payload(payload):
             "Unexpected sampling/export settings")
     require(config["runtime"]["windows_performance"] is True, "Unexpected process scheduling")
     require(config["training"]["cycles"] == config["convergence"]["min_cycles"] == 300, "Expected 300-cycle training")
-    config["runtime"]["windows_performance"] = False
     validate(config)
     return dict(payload, config=config, signature=signature(config), implementation_signature=implementation_signature())
 
@@ -143,7 +142,7 @@ def migrate(root, run, earlier, output, selection_run=None):
         prefix_csv_sha256=digest_file(output / "cycles_prefix.csv"), superseded_completed_cycles=superseded,
         sources=[dict(path=str(path), sha256=digest_file(path)) for path in sources],
         original_implementation_signature=OLD_IMPLEMENTATION, implementation_signature=implementation_signature(),
-        reviewed_changes=REVIEWED, runtime_changes={"runtime.windows_performance": [True, False]},
+        reviewed_changes=REVIEWED, runtime_changes={},
         learning_state_unchanged=True, interruption="Windows bugcheck 0x101; root cause undetermined")
     write_json(output / "provenance.json", proof)
     if selection_run:
