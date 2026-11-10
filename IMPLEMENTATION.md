@@ -88,6 +88,10 @@ JointPolicy包装原有两套SetPolicy作为phase条件分支，不增加可见�
 
 基线校准只调用实际使用的策略组件：Always-On始终全开，Upper-PPO-Greedy执行贪心调度，未使用的网络不推理或拟合归一化。Greedy慢层在同一次启停搜索内复用已验证剖面；不同场景不共享实例。单层进度和续训预算按实际方法/已完成阶段计算，禁用独立评价不影响续训轮数。check的Fixed-Window手写控制器兼容统一评价接口；它仅检查环境核算，evaluate仍要求该学习方法自己的检查点。启发式误用train在创建运行或权重之前报错。
 
+Greedy批量入口`scripts/evaluation/evaluate_greedy.py`只编排公共greedy/evaluate，不构造网络或修改算法。每个worker独立执行一个完整输入，按共同环境核算；20条输入不是20个训练种子。共享输入存data/processed/evaluation，首次冻结场景/种子/哈希后不可覆盖；输入需与已有训练种子台账隔离。evaluation.csv保存逐轨迹及pooled行，aggregate.csv保存轨迹均值/样本标准差（成本、能量除以实际槽数）；pooled按时率使用总完成/总到达，P95由全部完成延迟重算。物理检查只核算记录，不额外执行贪心。推理实测耗时记录但不自动加入预留控制时延，部署超时实验须另开配置。
+
+`always_on_finite_horizon.json`选择有限时域critic及sampled_return，单调度rollout为2048槽。与fixed_200组合产生4次预训练更新及200轮，每轮16个128槽episode；8192+200×2048=417792训练槽、256校准槽另计。保持原环境和目标，采样CPU4worker、更新CUDA/minibatch128复用公共overlay；相同物理预算不等于相同optimizer步数或已充分调优。
+
 检查点保存优化器、统计、随机状态、阶段、累计物理槽/epoch/完成episode及源码/输入签名。完成阶段last可续训；interrupted/failed_last若包含未完成阶段则只供诊断。槽上限在完整rollout前检查；时间上限在物理槽/优化器小批次边界检查，可能包含当前操作耗时的超出量。stopped与数值错误failed分开；恢复重复的未完成阶段交互单列。新增源码不强行加载旧签名权重。
 
 ## 定位问题与外部参考

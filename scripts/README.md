@@ -4,6 +4,7 @@
 
 |目录|入口|用途|
 |---|---|---|
+|evaluation/|evaluate_greedy.py --suite data/processed/evaluation/conditional-main-comparison-v1 --run-id evaluate-greedy-shared20|冻结20条128槽新请求输入，4进程执行同一贪心方法；无网络/训练。逐轨迹和池化CSV归results，物理记录及校验归logs/runs；逐轨迹样本标准差与池化指标分开，失败不填零。支持--trajectories/--first-seed/--workers；既有输入校验哈希并检查训练种子交集|
 |training/|compare_mechanisms.py --slots 32768|共同预训练后，等物理槽预算比较HPGI与joint_ppo；--overlay将同一加速/学习配置应用到双方。默认无独立评价，--evaluation-trajectories N仅结束时评价一次|
 |training/|overnight_queue.py --queue-id 名称 --wait-run 运行ID --candidate 运行ID --candidate 运行ID --seed 种子2 --seed 种子3|Windows一次性依赖队列；等指定运行成功200轮并退出后，按两候选尾20轮原始成本暂选，两个可见终端各跑一个新种子/200轮。冻结原配置和源码；失败/失配不抢跑、不重试；logs/queues保存状态/选法/退出码，结果仍归results各运行。等待及训练监控期间请求系统保持唤醒，不要求屏幕亮；完成后释放。24小时仅为监控上限，不强杀训练。两任务成功后调用已有绘图入口生成三种子均值与标准差阴影；旧199轮不补点|
 |plotting/|plot_convergence.py --curve "Joint PPO=results/<运行名>"|只读cycles.csv生成中英文学习曲线，支持多算法/独立种子、iteration/物理槽、滑动均值和标准差/置信带；图与复现快照归对应results的figures/convergence，详见docs/PLOTTING.md|

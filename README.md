@@ -28,7 +28,7 @@ mist-sim/
 ├── configs/       环境/算法JSON及组合入口
 ├── src/mist_sim/  唯一可安装源码；环境、PPO、基线、数据与指标
 ├── tests/         手算、反例、训练及恢复回归测试
-├── scripts/       data/数据处理，validation/核验，maintenance/维护，plotting/绘图
+├── scripts/       data/数据处理，evaluation/评价，training/训练编排，validation/核验，maintenance/维护，plotting/绘图
 ├── docs/          强化学习排障、图表统计及复现说明
 ├── data/          raw/原始输入，profiling/剖析及来源，processed/仿真数值输入
 ├── logs/runs/     正式训练/评价的运行记录，执行时创建
@@ -80,6 +80,12 @@ mist-sim/
 |full_information|同发布集合的理想真实信息参照|开关/调度交替PPO|
 
 `environment/anonymity/profiles/allocation`负责物理和信息边界；`policies、buffers、ppo、training`负责策略及学习；`evaluation/storage/diagnostics`负责核算、证据及复算。`reference_solvers`为有界离线/单隙枚举，完整搜索才称最优。MERA只作参考，详见[来源说明](references/README.md)。
+
+Greedy属于无需训练的因果启发式，仍逐槽与同一环境交互；相同输入不需要重复策略种子，不同请求轨迹用于衡量负载波动。Always-On、Fixed-Split、Single-Timescale等仍训练PPO，同时承担开关、切分、控制时间尺度的机制消融；Full-Information为理想信息参照，单列其信息优势。非学习方法报告评价指标，不伪造训练收敛曲线。
+
+共享请求输入的贪心批次入口：`python scripts/evaluation/evaluate_greedy.py --config configs/conditional.json --suite data/processed/evaluation/conditional-main-comparison-v1 --run-id evaluate-greedy-shared20`。默认20条新128槽输入、4个CPU进程；输入种子与已记录训练输入隔离，首次生成后固定文件哈希。后续已训练方法应读取同一输入，完整负载与初始状态保持一致；这是共同比较集，尚非最终盲测。
+
+Always-On公平物理预算入口：`python -m mist_sim train --config configs/conditional.json --overlay configs/algorithms/always_on_finite_horizon.json --overlay configs/algorithms/cuda_update.json --overlay configs/training/fixed_200.json --overlay configs/runtime/windows_performance.json --seed 4200001`。它只训练调度网络，2048槽/iteration、8192槽预训练、200轮共417792训练槽，与HPGI总槽数对齐；不代表相同梯度步数。独立评价关闭，校准256槽另计；--dry-run可只查看用量。
 
 ## 执行命令
 
