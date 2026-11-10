@@ -129,6 +129,8 @@ windows_performance仅在Windows显式启用：主进程及每个采样worker各
 
 其余学习基线复用同一train入口，通过--method选择表中方法；CPU采样、进程池、CUDA更新、整批张量缓存及诊断间隔均共用。单层方法只打印实际更新的组件。示例：
 
+Fixed-Split正式入口包含开发选点与独立PPO训练。先运行`python -m scripts.evaluation.select_fixed_split --suite data/processed/development/fixed-split-v1 --run-id select-fixed-split-v1`，穷举各模型合法点的全部组合，在相同开发输入与固定因果控制器下按原目标成本选择；不是保证所有可能学习策略下全局最优。随后运行`python -m scripts.training.train_fixed_split --selection-run select-fixed-split-v1 --suite data/processed/development/fixed-split-v1 --run-id train-fixed-split-selected-v1`，等待选择成功、校验输入/选择哈希、冻结逐模型切分，从头训练300轮；可重复传`--wait-run 运行ID`，等其中一项300轮训练退出后再打开可见终端。旧3/3/7仅为入口示例，不是选择依据，旧固定点权重不能直接沿用为重新选择后的结果。完整候选/排序/overlay归选择运行results，后续训练另存同名results/logs。
+
 ```powershell
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --overlay configs/algorithms/cuda_update.json --method fixed_split --set ppo_layers.upper.minibatch=64 --dry-run
 & D:/Anaconda/envs/pytorch/python.exe -m mist_sim evaluate --config configs/conditional.json --method greedy_consolidation --seed 4400019

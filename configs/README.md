@@ -12,7 +12,7 @@ device取cpu或cuda，仅控制PPO更新，采样/环境/GAE与推理保持CPU�
 
 algorithms/always_on_finite_horizon.json只训练全开服务器下的调度PPO，继承已用于HPGI的有限时域critic和sampled_return，rollout改为2048槽；与training/fixed_200.json组合为200轮、417792训练槽，与HPGI物理总预算一致。CUDA、4worker和Windows进程调度分别由现有overlay选择；不复制环境配置、不将200个点视为等优化器预算。
 
-training/fixed_300.json要求完成300轮：训练轮数和稳定早停最小轮数均为300，因此稳定判断不会提前结束这段训练。通用稳定早停机制及窗口、耐心、尾部观察仍保留，其他预设不变。已有早停检查点不能仅加extra-cycles续训：必须显式修订停止边界并重新计算该边界下的停止诊断，保留原运行和学习状态。Fixed-Split可叠加algorithms/hpgi_finite_horizon.json并用--method fixed_split选择：两层均训练，只固定卸载切分；当前ResNet-50/152为3、ViT-B/32为7，是预设固定参照，尚不代表开发集选出的最佳固定切分。并行资源可用--set runtime.collection_workers=2控制，不改变采样总量。
+training/fixed_300.json要求完成300轮：训练轮数和稳定早停最小轮数均为300，因此稳定判断不会提前结束这段训练。通用稳定早停机制及窗口、耐心、尾部观察仍保留，其他预设不变。已有早停检查点不能仅加extra-cycles续训：必须显式修订停止边界并重新计算该边界下的停止诊断，保留原运行和学习状态。Fixed-Split两层均训练，只固定卸载切分；正式流程见README的select_fixed_split/train_fixed_split入口，选点结果selected_overlay.json须覆盖默认值后从头训练。默认ResNet-50/152的3、ViT-B/32的7仅为未调优入口，不是论文依据。并行资源可用--set runtime.collection_workers=2控制，不改变采样总量。
 
 algorithms/single_timescale_finite_horizon.json选择Q=1，调度1024槽、开关1024区间，即每轮2048物理槽；叠加fixed_300后8192槽预训练＋300轮=622592训练槽。algorithms/upper_greedy_finite_horizon.json只训练开关PPO，调度实际调用公共容量感知贪心；Q=4、512区间即每轮2048物理槽，没有调度预训练，300轮为614400槽。两者都复用finite_horizon/sampled_return和公共CUDA/Windows运行overlay；校准各256槽另计。相同每轮交互量不等于相同总预训练或优化器预算，样本效率图须使用实际total_slots。
 

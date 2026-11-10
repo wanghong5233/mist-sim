@@ -1,5 +1,7 @@
 # 测试范围
 
+test_fixed_split_selection.py覆盖全部合法组合、配对开发输入完整性、按物理槽聚合原目标成本、非有限得分拒用、真实环境执行固定点、原输入不变，以及选择overlay真正进入独立300轮Fixed-Split配置；选择文件篡改须失败。只做微型环境执行和配置流转，不启动正式训练。
+
 test_process_runtime.py检查默认不改OS、非Windows显式拒用、配置布尔校验、200轮预算不提前稳定退出和Trainer入口；Windows子进程通过实际API读回AboveNormal及显式关闭的EXECUTION_SPEED。只修改测试子进程自身，退出后释放，不更改系统电源设置。
 
 test_plotting.py核对后向平滑初始窗口、按独立种子求标准差/可重复bootstrap、异长曲线只取共同坐标、单种子无统计带及重复种子拒用；检查训练中CSV只忽略未完成末行，图形数据快照可在原CSV追加后精确重画，篡改哈希时报错。实际渲染检查需安装可选依赖`.[test,plotting]`，缺少绘图依赖时仅该项跳过；图形产物在系统临时目录中清理，不启动训练或使用GPU。

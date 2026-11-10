@@ -5,7 +5,9 @@
 |目录|入口|用途|
 |---|---|---|
 |evaluation/|evaluate_greedy.py --suite data/processed/evaluation/conditional-main-comparison-v1 --run-id evaluate-greedy-shared20|冻结20条128槽新请求输入，4进程执行同一贪心方法；无网络/训练。逐轨迹和池化CSV归results，物理记录及校验归logs/runs；逐轨迹样本标准差与池化指标分开，失败不填零。支持--trajectories/--first-seed/--workers/--overlay；叠加runtime/windows_performance.json时主进程和worker继承AboveNormal/HighQoS并保存读回值；既有输入校验哈希并检查训练种子交集|
+|evaluation/|python -m scripts.evaluation.select_fixed_split --suite data/processed/development/fixed-split-v1 --run-id select-fixed-split-v1|穷举逐模型合法固定点的笛卡尔积；所有组合使用相同开发输入、公共因果贪心/容量约束/P3，按完整目标成本选择。默认2条128槽开发轨迹、4个CPU进程；保存全部候选CSV/排序/哈希及selected_overlay.json，之后作为固定点overlay传给fixed_split独立训练；不声称全局最优训练策略|
 |training/|compare_mechanisms.py --slots 32768|共同预训练后，等物理槽预算比较HPGI与joint_ppo；--overlay将同一加速/学习配置应用到双方。默认无独立评价，--evaluation-trajectories N仅结束时评价一次|
+|training/|python -m scripts.training.train_fixed_split --selection-run 选择运行ID --suite 开发输入目录 --run-id 训练ID|Fixed-Split正式工作流：等待选点完成、核对全部候选/物理场景/哈希、冻结选择，从头训练300轮；可重复--wait-run等任一既有300轮训练正常退出后开可见终端，避免第三路PPO竞争显存。低频last、运行/失败/队列状态分别遵循公共接口；不复用旧固定点权重|
 |training/|overnight_queue.py --queue-id 名称 --wait-run 运行ID --candidate 运行ID --candidate 运行ID --seed 种子2 --seed 种子3|Windows一次性依赖队列；等指定运行成功200轮并退出后，按两候选尾20轮原始成本暂选，两个可见终端各跑一个新种子/200轮。冻结原配置和源码；失败/失配不抢跑、不重试；logs/queues保存状态/选法/退出码，结果仍归results各运行。等待及训练监控期间请求系统保持唤醒，不要求屏幕亮；完成后释放。24小时仅为监控上限，不强杀训练。两任务成功后调用已有绘图入口生成三种子均值与标准差阴影；旧199轮不补点|
 |plotting/|plot_convergence.py --curve "Joint PPO=results/<运行名>"|只读cycles.csv生成中英文学习曲线，支持多算法/独立种子、iteration/物理槽、滑动均值和标准差/置信带；图与复现快照归对应results的figures/convergence，详见docs/PLOTTING.md|
 |validation/|benchmark_collection.py --checkpoint 路径|同冻结策略和8条输入轨迹比较2/4/6/8worker；区分冷启动、重复暖池中位数、worker墙钟/CPU/P3及回传等待，核对动作/概率/物理结果哈希；仅打印，旧快照只作诊断|
