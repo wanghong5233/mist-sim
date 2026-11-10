@@ -72,7 +72,7 @@ mist-sim/
 |joint_ppo|同轨迹阶段条件联合PPO；保留Q槽开关和逐槽调度|开关/调度联合PPO|
 |always_on|服务器全开|仅调度PPO|
 |fixed_split|逐模型固定合法切分|开关/调度交替PPO|
-|single_timescale|Q=1|开关/调度交替PPO|
+|single_timescale|Q=1，每槽重选开关及调度，保留长期回报|开关/调度交替PPO|
 |fixed_window|无联合容量掩码、学习速率、执行前投影|开关/调度交替PPO，含速率密度|
 |upper_ppo_greedy|容量感知增量成本贪心调度|仅开关PPO，无调度预训练|
 |greedy_consolidation|上一完整区间驱动启停、当前公开候选贪心|无需训练，直接evaluate|
