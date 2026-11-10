@@ -16,7 +16,7 @@ from .policies.hpgi import Controller
 from .policies.networks import upper_frame, lower_frame
 from .ppo import update
 from .traces import pack_behavior
-from .policies.batching import replay_chunks
+from .policies.batching import check_behavior_probability
 from .config import validate, layer_settings
 from .storage import digest_file
 from .checkpoints import trim_snapshots
@@ -387,12 +387,8 @@ class Trainer:
             self.event("rollout_ready", stage=name, layer=layer, rollout=rollout)
             trace_write_seconds = time.perf_counter() - trace_started
             probability_started = time.perf_counter()
-            with torch.no_grad():
-                differences = (replay_chunks(policy, buffer.samples, layer_settings(self.config, layer)["minibatch"]) -
-                               torch.tensor([sample["logprob"] for sample in buffer.samples])).abs().tolist()
+            probability_check = check_behavior_probability(policy, buffer.samples, layer_settings(self.config, layer)["minibatch"])
             probability_check_seconds = time.perf_counter() - probability_started
-            if max(differences, default=0) > 1e-5:
-                raise AssertionError("Behavior probability changed before update")
             audit = {} if detailed else None
             update_started = time.perf_counter()
             self.event("update_started", stage=name, samples=len(buffer.samples))
@@ -415,7 +411,7 @@ class Trainer:
                        physical_slots=len(records), raw_reward_sum=sum(record["reward"] for record in records),
                        detailed_trace=detailed,
                        raw_reward_per_slot=sum(record["reward"] for record in records) / len(records),
-                       behavior_logprob_error=max(differences, default=0),
+                       behavior_logprob_error=probability_check["max_error"], behavior_probability_check=probability_check,
                        reward_units=units,
                        reward_clipped_slots=sum(abs(record["reward"] * units["scale"]) > units["clip"]
                                                 for record in records) if units["clip"] is not None else 0,

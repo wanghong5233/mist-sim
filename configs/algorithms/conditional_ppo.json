@@ -12,7 +12,7 @@
     "cycles": 3000, "calibration_episodes": 2},
   "seeds": {"train": 4200001, "validation": 4300017, "test": 4400019},
   "device": "cpu", "ppo_layers": {"upper": {}, "lower": {}},
-  "checkpoint_policy": {"stage_interval": 0, "keep_stages": 2, "mode": "minimal", "cycle_interval": 250},
+  "checkpoint_policy": {"stage_interval": 0, "keep_stages": 2, "mode": "minimal", "cycle_interval": 10},
   "trace_retention": {"phases": 2, "validations": 2, "inputs": 2},
   "convergence": {"enabled": true, "min_cycles": 100, "window": 20,
     "relative_mean_tolerance": 0.005, "relative_trend_tolerance": 0.01,

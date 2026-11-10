@@ -38,3 +38,34 @@ def test_training_curve_without_any_extra_evaluation(config, tmp_path, monkeypat
         assert len(restored.cycle_history) == 3
     finally:
         store.finish()
+
+
+def test_minimal_periodic_checkpoint_survives_later_phase_failure(config, tmp_path, monkeypatch):
+    from mist_sim.config import for_method
+    config = for_method(config, "always_on")
+    config["validation"]["enabled"] = False
+    config["training"].update(pretrain_slots=2, fast_slots=2, cycles=3, calibration_episodes=1)
+    config["horizon"] = 4
+    config["ppo"]["epochs"] = 1
+    config["monitoring"] = dict(tensorboard=False, console=False)
+    config["checkpoint_policy"] = dict(mode="minimal", stage_interval=0, keep_stages=0, cycle_interval=2)
+    store = RunStore(Path(__file__).resolve().parents[1], config, "train", 91, output_dir=tmp_path)
+    trainer = Trainer(config, 91, store)
+    original = trainer.collect
+    def interrupt(layer, count, pretrain=False):
+        if len(trainer.cycle_history) == 2:
+            raise RuntimeError("injected third cycle failure")
+        return original(layer, count, pretrain)
+    monkeypatch.setattr(trainer, "collect", interrupt)
+    try:
+        with pytest.raises(RuntimeError, match="injected"):
+            trainer.run()
+        restored = Trainer.load(store.path / "checkpoints/last.pt")
+        assert len(restored.cycle_history) == 2
+        assert restored.completed_stages[-1] == "cycle_001_lower"
+        assert restored.versions["lower"] == 3
+        restored.run()
+        assert [r["stage"] for r in restored.cycle_history] == ["cycle_000", "cycle_001", "cycle_002"]
+        assert restored.versions["lower"] == 4
+    finally:
+        store.finish()

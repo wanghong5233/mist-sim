@@ -92,7 +92,9 @@ Greedy批量入口`scripts/evaluation/evaluate_greedy.py`只编排公共greedy/e
 
 `always_on_finite_horizon.json`选择有限时域critic及sampled_return，单调度rollout为2048槽。与fixed_200组合产生4次预训练更新及200轮，每轮16个128槽episode；8192+200×2048=417792训练槽、256校准槽另计。保持原环境和目标，采样CPU4worker、更新CUDA/minibatch128复用公共overlay；相同物理预算不等于相同optimizer步数或已充分调优。
 
-检查点保存优化器、统计、随机状态、阶段、累计物理槽/epoch/完成episode及源码/输入签名。完成阶段last可续训；interrupted/failed_last若包含未完成阶段则只供诊断。槽上限在完整rollout前检查；时间上限在物理槽/优化器小批次边界检查，可能包含当前操作耗时的超出量。stopped与数值错误failed分开；恢复重复的未完成阶段交互单列。新增源码不强行加载旧签名权重。
+检查点保存优化器、统计、随机状态、阶段、累计物理槽/epoch/完成episode及源码/输入签名。conditional每10个完整iteration原子覆盖唯一last；完成阶段last可续训，interrupted/failed_last若包含未完成阶段默认只供诊断。槽上限在完整rollout前检查；时间上限在物理槽/优化器小批次边界检查，可能包含当前操作耗时的超出量。stopped与数值错误failed分开；恢复重复的未完成阶段交互单列。新增源码不强行加载旧签名权重。独立故障迁移必须核对原快照哈希、原/新源码逐文件白名单、失败前无update事件、Adam步数等于完整history、状态有限性和完整CSV；仅修改已审计保护元数据，保留学习状态/RNG和已消耗采样计数，不能将此入口泛化为忽略签名。
+
+更新前行为概率检查由batching.check_behavior_probability共用。float32批量矩阵计算可能与采样时逐条计算有微差；超过绝对1e−5的行逐条复算，逐条与原概率仍须相差≤1e−5，批量与逐条差额另须≤8×float32_eps×max(1, |原logprob|, 条件决策数)。仅异常行增加逐条计算，不重写行为概率或更新路径；metrics记录batch最大差、回退行数及逐条误差，非有限值/真实策略失配仍失败。
 
 ## 定位问题与外部参考
 

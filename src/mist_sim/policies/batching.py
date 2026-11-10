@@ -276,3 +276,35 @@ def replay_chunks(policy, samples, size=64, cache=None):
     """Bound temporary tensors for full-rollout diagnostics; skip unused critic."""
     return torch.cat([replay_batch(policy, samples[start:start + size], False, cache)[0]
                       for start in range(0, len(samples), size)])
+
+
+@torch.no_grad()
+def check_behavior_probability(policy, samples, size=64):
+    """Check frozen behavior; disambiguate only suspect batch rows with serial replay.
+
+    CPU float32 GEMM and reductions depend on batch shape. A serial match is
+    required before allowing a small, bounded batch discrepancy. PPO still uses
+    the original behavior probabilities and the unchanged batched gradient path.
+    """
+    replayed = replay_chunks(policy, samples, size)
+    old = replayed.new_tensor([sample["logprob"] for sample in samples])
+    if not torch.isfinite(old).all() or not torch.isfinite(replayed).all():
+        raise FloatingPointError("Nonfinite behavior probability")
+    errors = (replayed - old).abs()
+    suspect = (errors > 1e-5).nonzero().flatten().tolist()
+    serial_max = 0.0
+    for index in suspect:
+        sample = samples[index]
+        subpolicy = policy.phase_policies[sample["phase"]] if hasattr(policy, "phase_policies") else policy
+        serial = subpolicy.replay(sample)[0]
+        serial_error = float((serial - old[index]).abs())
+        # Absolute serial guard is retained; the batch allowance scales with
+        # the number of conditionals and magnitude of their accumulated log P.
+        bound = 8 * torch.finfo(replayed.dtype).eps * max(1., abs(float(old[index])), len(sample["steps"]))
+        if not torch.isfinite(serial) or serial_error > 1e-5 or float((replayed[index] - serial).abs()) > bound:
+            raise AssertionError(f"Behavior probability changed before update: row={index}, "
+                                 f"batch_error={float(errors[index]):.9g}, serial_error={serial_error:.9g}, "
+                                 f"roundoff_bound={bound:.9g}")
+        serial_max = max(serial_max, serial_error)
+    return dict(max_error=float(errors.max()) if len(samples) else 0.,
+                serial_fallback_rows=len(suspect), serial_max_error=serial_max)

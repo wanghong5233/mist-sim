@@ -7,7 +7,7 @@ import torch
 from .buffers import EventRolloutBuffer
 from .diagnostics import policy_input_diagnostics, rollout_diagnostics
 from .evaluation import summarize
-from .policies.batching import replay_chunks
+from .policies.batching import check_behavior_probability
 from .policies.networks import upper_frame, lower_frame
 from .ppo import update
 from .rewards import training_reward
@@ -97,11 +97,8 @@ def joint_phase(trainer, name, count):
     trainer.event("rollout_ready", stage=name, layer="joint", rollout=rollout)
     trace_seconds = time.perf_counter() - trace_started
     probability_started = time.perf_counter()
-    with torch.no_grad():
-        difference = float((replay_chunks(trainer.joint_policy, buffer.samples, settings["minibatch"]) -
-                            torch.tensor([sample["logprob"] for sample in buffer.samples])).abs().max())
-    if difference > 1e-5:
-        raise AssertionError("Joint behavior probability changed before update")
+    probability_check = check_behavior_probability(trainer.joint_policy, buffer.samples, settings["minibatch"])
+    difference = probability_check["max_error"]
     probability_seconds = time.perf_counter() - probability_started
     audit = {} if detailed else None
     event_counts = {phase: sum(sample["phase"] == phase for sample in buffer.samples) for phase in ("upper", "lower")}
@@ -125,7 +122,7 @@ def joint_phase(trainer, name, count):
     raw_reward = sum(record["reward"] for record in records)
     metrics = dict(iteration=len(trainer.history) + 1, stage=name, layer="joint", event_counts=event_counts,
         physical_slots=len(records), raw_reward_sum=raw_reward, raw_reward_per_slot=raw_reward / len(records),
-        detailed_trace=detailed, behavior_logprob_error=difference, reward_units=units,
+        detailed_trace=detailed, behavior_logprob_error=difference, behavior_probability_check=probability_check, reward_units=units,
         reward_clipped_slots=sum(abs(record["reward"] * units["scale"]) > units["clip"] for record in records)
             if units["clip"] is not None else 0,
         physical_cost_components={"conservative_energy": sum(record["conservative_energy"] for record in records),

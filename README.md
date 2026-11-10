@@ -213,7 +213,9 @@ training.cycles上限3000。conditional的convergence直接使用训练采样原
 
 此外保留显式--max-slots N/--max-seconds S预算限制、用户中断与错误退出。交互上限在完整rollout前检查，时间上限在槽/小批边界检查；中途打断保存interrupted.pt供诊断，续训使用最近已保存的last.pt。低频保存期间的更新可能需要重跑。KL>.03只结束本批PPO更新，不结束训练；非有限损失/梯度标记failed。
 
-conditional使用checkpoint_policy.mode=minimal：只覆盖last.pt，在启动、预训练完成、每250个完整iteration和正常结束保存，不逐组件/逐轮保存，不保存best或selected副本；最佳评价仅记录数值，不能据此声称存在相应权重。检查点保留网络、优化器、统计及随机状态供中断恢复与后续评价；完整曲线CSV每轮照常保存。其他配置默认full模式保持initial/last/final/best/selected语义，阶段快照须显式开启并设保留上限。
+conditional使用checkpoint_policy.mode=minimal：只覆盖last.pt，在启动、预训练完成、每10个完整iteration和正常结束保存，不逐组件/逐轮保存，不保存best或selected副本；最佳评价仅记录数值，不能据此声称存在相应权重。检查点保留网络、优化器、统计及随机状态供中断恢复与后续评价；完整曲线CSV每轮照常保存。其他配置默认full模式保持initial/last/final/best/selected语义，阶段快照须显式开启并设保留上限。
+
+更新前的行为概率检查先批量复算；误差超过1e−5时，仅对异常样本按采样路径逐条复算。逐条结果仍须满足1e−5，批量差额另受float32舍入界约束；非有限值或真实失配继续报错。此修复共用于HPGI、Joint PPO与学习基线，不改变PPO概率或梯度。源码签名不匹配仍禁止通用续训；只有明确证明未进入更新、且逐项审计学习状态和源码变更的故障，才可独立迁移恢复。新运行CSV保留原iteration编号，绘图合并须保留两段来源及未使用采样成本。
 
 conditional每10次组件更新保存一次完整behavior/update/physical诊断；HPGI分别按开关/调度更新次数计数，避免固定间隔漏掉一侧。保留最近2组及最近2条输入；不再每阶段写巨大JSON再清理。input_seeds.jsonl保留全部种子，所有训练CSV/梯度/KL摘要每轮照常记录。未记录或已清理阶段不支持逐动作直接重放。独立评价关闭时不创建validation结果或选择最佳权重。
 

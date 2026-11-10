@@ -78,3 +78,35 @@ def test_batched_mask_zero_gradient():
         assert outputs[0].grad[0].abs().item() > 0
     finally:
         handle.remove()
+
+
+@pytest.mark.parametrize("kind", ["roundoff", "old_policy", "bad_batch", "nan", "joint"])
+def test_behavior_guard_distinguishes_roundoff_from_policy_drift(monkeypatch, kind):
+    from types import SimpleNamespace
+    from mist_sim.policies import batching
+    torch.set_num_threads(1)
+    torch.manual_seed(73)
+    policy = SetPolicy(16)
+    frame = dict(items=[], servers=[[0.] * 13], context=[0.] * CONTEXT_DIM)
+    sample = dict(frame=frame, steps=[dict(features=[[0.] * 19, [1.] * 19],
+                  prefix=[0.] * 7, mask=[True, True], action=0) for _ in range(19)])
+    with torch.no_grad():
+        original = policy.replay(sample)[0].detach()
+    sample["logprob"] = float(original) + (.01 if kind == "old_policy" else 0.)
+    replayed = original.reshape(1) + (.01 if kind == "bad_batch" else 1.1444091796875e-5)
+    if kind == "nan":
+        replayed[:] = float("nan")
+    monkeypatch.setattr(batching, "replay_chunks", lambda *args: replayed)
+    if kind == "joint":
+        sample["phase"] = "lower"
+        policy = SimpleNamespace(phase_policies={"lower": policy})
+    if kind in ("old_policy", "bad_batch"):
+        with pytest.raises(AssertionError, match="Behavior probability changed"):
+            batching.check_behavior_probability(policy, [sample])
+    elif kind == "nan":
+        with pytest.raises(FloatingPointError, match="Nonfinite"):
+            batching.check_behavior_probability(policy, [sample])
+    else:
+        result = batching.check_behavior_probability(policy, [sample])
+        assert result["serial_fallback_rows"] == 1
+        assert result["serial_max_error"] == 0.
