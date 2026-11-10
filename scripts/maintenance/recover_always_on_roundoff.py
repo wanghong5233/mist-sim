@@ -64,7 +64,7 @@ def finite_state(value):
     return True
 
 
-def merge_continuation(root, run, recovery, continuation):
+def merge_continuation(root, run, recovery, continuation, restart=None):
     """Create a derived plotting CSV; original segment files are never modified."""
     require(Path(continuation).name == continuation, "Invalid continuation run id")
     provenance = json.loads((recovery / "provenance.json").read_text(encoding="utf-8"))
@@ -80,6 +80,30 @@ def merge_continuation(root, run, recovery, continuation):
     expected["checkpoint_policy"]["cycle_interval"] = 10
     require(config == expected, "Learning configuration changed")
     sources = [original, root / "results" / continuation / "cycles.csv"]
+    cutoff, rollback_slots, restart_identity = None, 0, None
+    active_run = continuation
+    if restart:
+        require(Path(restart).name == restart, "Invalid restart run id")
+        restart_log = root / "logs/runs" / restart
+        restarted = json.loads((restart_log / "manifest.json").read_text(encoding="utf-8"))
+        checkpoint = log / "checkpoints/last.pt"
+        require(Path(restarted["checkpoint"]["path"]).resolve() == checkpoint.resolve(), "Different restart parent")
+        require(restarted["checkpoint"]["sha256"] == digest_file(checkpoint), "Restart checkpoint changed")
+        require(restarted["seed"] == manifest["seed"], "Restart seed changed")
+        restarted_config = json.loads((restart_log / "resolved_config.json").read_text(encoding="utf-8"))
+        require(restarted_config == config, "Restart learning configuration changed")
+        state = torch.load(checkpoint, map_location="cpu", weights_only=False)
+        require(state["resumable"] and state["config"] == config, "Invalid completed restart checkpoint")
+        require(state["implementation_signature"] == implementation_signature(), "Restart source changed")
+        cutoff = len(state["cycle_history"])
+        require(139 < cutoff < 200, "Unexpected restart boundary")
+        events = [json.loads(line) for line in (log / "progress.jsonl").read_text(encoding="utf-8").splitlines()]
+        rollback_slots = max(event["total_slots"] for event in events) - state["total_slots"]
+        require(rollback_slots >= 0, "Negative restart accounting")
+        restart_identity = dict(run=restart, checkpoint=str(checkpoint), sha256=digest_file(checkpoint),
+                                retained_through_iteration=cutoff, rollback_slots=rollback_slots)
+        sources.append(root / "results" / restart / "cycles.csv")
+        active_run, manifest = restart, restarted
     rows, segments, fields = [], [], None
     for path in sources:
         content = path.read_bytes()
@@ -91,10 +115,14 @@ def merge_continuation(root, run, recovery, continuation):
         part = list(reader)
         require(bool(part) and all(None not in row and None not in row.values() for row in part), "Malformed CSV")
         require(all(int(row["seed"]) == 4200001 for row in part), "Mixed seeds")
-        segments.append(dict(path=str(path), sha256=hashlib.sha256(content).hexdigest(), rows=len(part),
-                             first=int(part[0]["cycle_index"]), last=int(part[-1]["cycle_index"])))
+        segment = dict(path=str(path), sha256=hashlib.sha256(content).hexdigest(), rows=len(part),
+                       first=int(part[0]["cycle_index"]), last=int(part[-1]["cycle_index"]))
+        if cutoff is not None and path == sources[1]:
+            segment["excluded_superseded_iterations"] = [int(row["cycle_index"]) for row in part if int(row["cycle_index"]) > cutoff]
+            part = [row for row in part if int(row["cycle_index"]) <= cutoff]
+        segments.append(segment)
         for row in part:
-            rows.append(dict(row, source_run_id=row["run_id"], run_id=continuation))
+            rows.append(dict(row, source_run_id=row["run_id"], run_id=active_run))
     require([int(row["cycle_index"]) for row in rows] == list(range(1, len(rows) + 1)), "Iteration gap or overlap")
     require(140 <= len(rows) <= 200, "Unexpected combined curve length")
     slots = [int(row["total_slots"]) for row in rows]
@@ -109,7 +137,9 @@ def merge_continuation(root, run, recovery, continuation):
     temporary.replace(destination / "cycles.csv")
     write_json(destination / "provenance.json", dict(segments=segments, recovery=str(recovery / "provenance.json"),
         rows=len(rows), target=200, continuation_status=manifest["status"],
-        discarded_unapplied_slots=2048, combined_csv_sha256=digest_file(destination / "cycles.csv"),
+        discarded_unapplied_slots=2048, discarded_rollback_slots=rollback_slots, restart=restart_identity,
+        actual_training_slots_including_retries=slots[-1] + rollback_slots,
+        combined_csv_sha256=digest_file(destination / "cycles.csv"),
         identity="Same seed and learning state; run_id unified for plotting, source_run_id retains segment identity"))
     print(json.dumps(dict(combined_csv=str(destination / "cycles.csv"), iterations=len(rows))), flush=True)
 
@@ -119,11 +149,14 @@ def main():
     parser.add_argument("--run", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--merge-continuation", help="Refresh a derived curve from this audited recovery's actual CSV segments")
+    parser.add_argument("--restart-run", help="Normal checkpoint restart after the first continuation; exclude its superseded tail")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     run, output = args.run.resolve(), args.output.resolve()
     if args.merge_continuation:
-        return merge_continuation(root, run, output, args.merge_continuation)
+        return merge_continuation(root, run, output, args.merge_continuation, args.restart_run)
+    if args.restart_run:
+        parser.error("--restart-run requires --merge-continuation")
     require(not output.exists(), "Recovery destination already exists")
     checkpoint = run / "checkpoints/failed_last.pt"
     require(digest_file(checkpoint) == CHECKPOINT, "Not the audited incident checkpoint")
