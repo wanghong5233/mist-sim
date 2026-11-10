@@ -15,6 +15,7 @@ from mist_sim.config import default_project_root, for_method, load_config
 from mist_sim.diagnostics import check_physics
 from mist_sim.evaluation import evaluate, summarize
 from mist_sim.policies.baselines.heuristics import greedy_fast, greedy_slow
+from mist_sim.process_runtime import configure_process
 from mist_sim.storage import RunStore, digest_file, write_json
 
 
@@ -72,6 +73,7 @@ def freeze_suite(root, directory, config, seeds):
 
 def evaluate_one(config, path, expected_hash, records_path):
     torch.set_num_threads(1)
+    runtime = configure_process(config["runtime"]["windows_performance"])
     if digest_file(path) != expected_hash:
         raise ValueError("Evaluation input checksum mismatch")
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -81,7 +83,7 @@ def evaluate_one(config, path, expected_hash, records_path):
     # Checks recorded arithmetic and capacities; does not rerun the controller.
     physics = check_physics(config, records)
     return {"seed": payload["seed"], "metrics": metrics, "physics": physics,
-            "wall_seconds": time.perf_counter() - started, "records_sha256": digest_file(records_path)}
+            "wall_seconds": time.perf_counter() - started, "records_sha256": digest_file(records_path), "runtime": runtime}
 
 
 def aggregate(records, metrics, slots):
@@ -102,6 +104,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=default_project_root())
     parser.add_argument("--config", type=Path, default=Path("configs/conditional.json"))
+    parser.add_argument("--overlay", type=Path, action="append", default=[])
     parser.add_argument("--suite", type=Path, required=True)
     parser.add_argument("--first-seed", type=int, default=4400101)
     parser.add_argument("--trajectories", type=int, default=20)
@@ -111,12 +114,13 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.trajectories < 1 or not 1 <= args.workers <= 32:
         parser.error("Positive trajectory count and 1..32 workers required")
-    config = for_method(load_config(args.config), "greedy_consolidation")
+    config = for_method(load_config(args.config, args.overlay), "greedy_consolidation")
     seeds = list(range(args.first_seed, args.first_seed + args.trajectories))
     suite = freeze_suite(args.root, args.suite, config, seeds)
     store = RunStore(args.root, config, "evaluate greedy shared-suite " + " ".join(sys.argv[1:]),
                      seeds[0], args.run_id, output_dir=args.output_dir)
     try:
+        store.write_json("runtime.json", configure_process(config["runtime"]["windows_performance"]))
         store.manifest["evaluation_suite"] = {"path": str(args.suite.resolve()),
             "sha256": digest_file(args.suite / "manifest.json"), "inputs": suite["inputs"]}
         store.manifest["budget"] = {"trajectories": len(seeds), "physical_slots": len(seeds) * config["horizon"],

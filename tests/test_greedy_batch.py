@@ -21,11 +21,13 @@ def test_parallel_greedy_matches_serial_and_keeps_raw_evidence(config, tmp_path)
     config["horizon"] = 4
     path = tmp_path / "config.json"
     write_json(path, config)
+    overlay = tmp_path / "runtime.json"
+    write_json(overlay, {"runtime": {"windows_performance": sys.platform == "win32"}})
     suite = tmp_path / "suite"
     runs = []
     for workers in (1, 2):
         name = f"workers{workers}"
-        command = [sys.executable, str(SCRIPT), "--config", str(path), "--suite", str(suite),
+        command = [sys.executable, str(SCRIPT), "--config", str(path), "--overlay", str(overlay), "--suite", str(suite),
                    "--first-seed", "91", "--trajectories", "2", "--workers", str(workers),
                    "--run-id", name, "--output-dir", str(tmp_path / "outputs")]
         subprocess.run(command, cwd=ROOT, capture_output=True, check=True, timeout=90)
@@ -34,6 +36,8 @@ def test_parallel_greedy_matches_serial_and_keeps_raw_evidence(config, tmp_path)
         manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
         assert manifest["status"] == "completed"
         assert manifest["budget"]["training_updates"] == 0
+        runtime = json.loads((run / "summaries/seed91.json").read_text(encoding="utf-8"))["runtime"]
+        assert runtime["status"] == ("applied" if sys.platform == "win32" else "unchanged")
         assert not (run / "checkpoints").exists()
         with (run / "results/evaluation.csv").open(encoding="utf-8", newline="") as stream:
             rows = list(csv.DictReader(stream))
