@@ -1,25 +1,48 @@
 """Causal greedy baselines, using only public problems/history."""
 from ...environment import PublicProblem
+from ...allocation import solve_p3
 from ...profiles import Profiles
 
 
 def greedy_fast(problem):
     actions = [0] * len(problem.choices)
     usage = problem.empty_usage()
-    current_cost = problem.scheduling_cost(actions)
+    # Future requests remain rejected. Adding a request can only alter the P3
+    # rates of its target server; preserve all other per-request costs.
+    costs = [problem.choice_cost(options[0], 0.0) for options in problem.choices]
+    assignments = [[] for _ in problem.config["servers"]]
+    current_cost = sum(costs)
     for index, options in enumerate(problem.choices):
         legal = problem.mask(options, usage)
         best_action, best_cost = 0, current_cost
+        best_costs = costs
         for action in range(1, len(options)):
             if not legal[action]:
                 continue
-            trial = list(actions)
-            trial[index] = action
-            cost = problem.scheduling_cost(trial)
+            choice = options[action]
+            trial_costs = list(costs)
+            if choice["kind"] == "edge":
+                indices = assignments[choice["server"]] + [index]
+                selected = [problem.choices[other][actions[other]] for other in indices[:-1]] + [choice]
+                rates = solve_p3([item["alpha"] for item in selected],
+                                 [item["beta"] for item in selected],
+                                 [item["minimum"] for item in selected],
+                                 problem.config["servers"][choice["server"]]["capacity"])
+                for other, item, rate in zip(indices, selected, rates):
+                    trial_costs[other] = problem.choice_cost(item, rate)
+            else:
+                trial_costs[index] = problem.choice_cost(choice, 0.0)
+            # Use the original request-order sum, including for close ties.
+            cost = sum(trial_costs)
             if cost < best_cost - 1e-12:
                 best_action, best_cost = action, cost
+                best_costs = trial_costs
         actions[index] = best_action
         current_cost = best_cost
+        costs = best_costs
+        choice = options[best_action]
+        if choice["kind"] == "edge":
+            assignments[choice["server"]].append(index)
         problem.reserve(options[best_action], usage)
     return actions, None, None
 

@@ -96,7 +96,7 @@ def ps_quote(value):
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def terminal_command(root, python, config, run_id, seed, receipt, title):
+def terminal_command(root, python, config, run_id, seed, receipt, title, checkpoint=None, curve_recovery=None):
     # Native stdout stays attached to the new console, preserving tqdm behavior.
     code = "\n".join([
         "$ErrorActionPreference = 'Stop'",
@@ -106,8 +106,14 @@ def terminal_command(root, python, config, run_id, seed, receipt, title):
         "$trainingExit = 1",
         "try {",
         "  & " + ps_quote(python) + " -m mist_sim train --config " + ps_quote(config)
-        + " --seed " + ps_quote(seed) + " --run-id " + ps_quote(run_id),
+        + " --seed " + ps_quote(seed) + " --run-id " + ps_quote(run_id)
+        + (" --checkpoint " + ps_quote(checkpoint) if checkpoint else ""),
         "  $trainingExit = $LASTEXITCODE",
+        *( ["  if ($trainingExit -eq 0) {",
+            "    & " + ps_quote(python) + " -m scripts.maintenance.optimize_training_runtime --root " + ps_quote(root)
+            + " --output " + ps_quote(curve_recovery) + " --merge-run " + ps_quote(run_id),
+            "    $trainingExit = $LASTEXITCODE",
+            "  }"] if curve_recovery else []),
         "} catch { Write-Host $_ -ForegroundColor Red }",
         "$receiptText = @{exit_code=$trainingExit;finished_utc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json",
         "[IO.File]::WriteAllText(" + ps_quote(str(receipt) + ".partial") + ", $receiptText)",

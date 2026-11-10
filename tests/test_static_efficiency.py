@@ -1,5 +1,6 @@
 """Operation-count checks: no training or timing-sensitive assertions."""
 import hashlib
+import pytest
 from pathlib import Path
 from unittest.mock import Mock
 from mist_sim.anonymity import publish
@@ -8,6 +9,54 @@ from mist_sim.profiles import Profiles
 from mist_sim.policies.baselines.heuristics import greedy_fast
 from mist_sim.storage import digest_file
 from tests.test_physics import request
+
+
+def reference_greedy(problem):
+    actions = [0] * len(problem.choices)
+    usage = problem.empty_usage()
+    for index, options in enumerate(problem.choices):
+        best, cost = 0, problem.scheduling_cost(actions)
+        for action, legal in enumerate(problem.mask(options, usage)):
+            if not action or not legal:
+                continue
+            trial = list(actions)
+            trial[index] = action
+            trial_cost = problem.scheduling_cost(trial)
+            if trial_cost < cost - 1e-12:
+                best, cost = action, trial_cost
+        actions[index] = best
+        problem.reserve(options[best], usage)
+    return actions
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_incremental_greedy_matches_full_allocator(config, seed):
+    from mist_sim.anonymity import generate_trace
+    config["k"] = 1
+    for batch in generate_trace(config, seed):
+        for ready in ([1, 1], [1, 0], [0, 0]):
+            problem = PublicProblem(config, publish(batch, config), [1, 1], ready, 0, [])
+            expected = reference_greedy(problem)
+            actual = greedy_fast(problem)[0]
+            assert actual == expected
+            assert problem.scheduling_cost(actual) == problem.scheduling_cost(expected)
+
+
+def test_greedy_does_not_resolve_unaffected_servers(config, monkeypatch):
+    from mist_sim.allocation import solve_p3
+    import mist_sim.policies.baselines.heuristics as heuristics
+    for server in config["servers"]:
+        server.update(capacity=10, memory=100)
+    config["access_points"][0]["bandwidth"] = 100
+    problem = PublicProblem(config, [], [1, 1], [1, 1], 0, [])
+    problem.choices = [[dict(kind="reject", cost_fixed=100),
+        dict(kind="edge", cost_fixed=0, server=server, ap=0, memory=1,
+             bandwidth=1, minimum=1, alpha=.01, beta=10)] for server in [0, 1, 1]]
+    solver = Mock(wraps=solve_p3)
+    monkeypatch.setattr(heuristics, "solve_p3", solver)
+    assert greedy_fast(problem)[0] == reference_greedy(problem) == [1, 1, 1]
+    assert solver.call_count == 3
+    assert [len(call.args[0]) for call in solver.call_args_list] == [1, 1, 2]
 
 
 def test_profile_bounds_once_per_split_and_request(config):

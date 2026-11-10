@@ -13,6 +13,21 @@ from scripts.evaluation.evaluate_greedy import scenario
 from scripts.training.train_fixed_split import selected_training_config
 
 
+def test_resumed_dependency_releases_only_after_full_300_cycles(tmp_path, monkeypatch):
+    from scripts.training.train_fixed_split import available_dependency
+    monkeypatch.setattr("scripts.training.train_fixed_split.process_alive", lambda pid: False)
+    run = "continued-baseline"
+    folder = tmp_path / "logs/runs" / run
+    write_json(folder / "manifest.json", dict(status="completed", exit_code=0))
+    write_json(folder / "process_policy.json", dict(pid=123))
+    # Resumed cycles.csv is a suffix; the checkpoint-backed history is complete.
+    write_json(folder / "cycle_history.json", [dict(stage=f"cycle_{index:03d}") for index in range(300)])
+    assert available_dependency(tmp_path, [run]) == run
+    write_json(folder / "cycle_history.json", [dict(stage=f"cycle_{index:03d}") for index in range(299)])
+    with pytest.raises(RuntimeError, match="300 iterations"):
+        available_dependency(tmp_path, [run])
+
+
 def test_all_combinations_and_fixed_environment():
     config = load_config("configs/smoke.json")
     candidates = candidate_cuts(config)
@@ -86,7 +101,7 @@ def test_selected_cuts_reach_actual_training_and_tampering_fails(tmp_path):
     assert config["fixed_split"] == selected
     assert config["training"]["cycles"] == config["convergence"]["min_cycles"] == 300
     assert config["seeds"]["train"] == 123456
-    assert config["device"] == "cuda" and config["runtime"]["collection_workers"] == 2
+    assert config["device"] == "cuda" and config["runtime"]["collection_workers"] == 4
     write_json(result / "selected_overlay.json", dict(fixed_split=candidates[0], device="cpu"))
     with pytest.raises(ValueError, match="changed after scoring"):
         selected_training_config(tmp_path, name, suite, 123456)

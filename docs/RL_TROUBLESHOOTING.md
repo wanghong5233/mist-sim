@@ -66,7 +66,7 @@ HPGI启用新估计器后的真实剖面短检查，可用`check_profile_chain.p
 |局部策略到底能不能学|diagnose_learning.py默认探针使用Joint事件链，仅用于兼容Joint快照；不直接拿HPGI或单层基线快照套这个脚本。先核对结构兼容，局部改善不外推全时域|
 |慢在环境还是更新/整理数据|collection_timing、collection_seconds、update_timings、device_metrics、probability_check_seconds、diagnostics_seconds和trace_write_seconds；在不竞争正式训练资源时才做独立计时|
 
-先从轻量CSV/metrics定位，再读一个实际保留的详细阶段；稀疏记录和保留上限意味着不是每轮都有完整轨迹。查版本用`git show 提交号 -- 文件路径`，不要通过跳过签名校验把旧快照伪装成可续训。运行失败时保留Traceback、已完成更新和来源，临时探针在系统临时目录退出清理。
+正式conditional训练默认diagnostics.phase_interval=0，只保留结果CSV、轻量metrics和输入种子；buffer正常更新，不导出整批训练数据。排障时在独立有界运行显式设置正整数间隔，再读取保留的详细阶段；不要为了潜在排障给每轮正式训练增加大JSON。查版本用`git show 提交号 -- 文件路径`，不要通过跳过签名校验把旧快照伪装成可续训。运行失败时保留Traceback、已完成更新和来源，临时探针在系统临时目录退出清理。
 
 ## 维护方式
 

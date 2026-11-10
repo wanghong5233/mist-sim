@@ -293,8 +293,8 @@ def validate(config):
     if type(validation.get("enabled", True)) is not bool:
         raise ValueError("validation.enabled must be boolean")
     diagnostics = config.get("diagnostics", {"phase_interval": 1})
-    if set(diagnostics) != {"phase_interval"} or type(diagnostics["phase_interval"]) is not int or diagnostics["phase_interval"] < 1:
-        raise ValueError("diagnostics.phase_interval must be a positive integer")
+    if set(diagnostics) != {"phase_interval"} or type(diagnostics["phase_interval"]) is not int or diagnostics["phase_interval"] < 0:
+        raise ValueError("diagnostics.phase_interval must be a nonnegative integer (0 disables detailed exports)")
     if type(validation.get("trajectories", 1)) is not int or validation.get("trajectories", 1) < 1:
         raise ValueError("Validation trajectory count must be a positive integer")
     validation_seeds = [config["seeds"]["validation"] + 10000 * index for index in range(validation.get("trajectories", 1))]

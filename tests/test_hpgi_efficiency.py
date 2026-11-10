@@ -13,6 +13,54 @@ from mist_sim.storage import RunStore
 from mist_sim.training import Trainer
 
 
+@pytest.mark.parametrize("method,workers", [("hpgi", 0), ("joint_ppo", 0),
+                                           ("single_timescale", 2), ("upper_ppo_greedy", 0)])
+def test_disabled_exports_keep_training_buffer_results_and_resume(config, tmp_path, monkeypatch, method, workers):
+    import csv
+    import mist_sim.diagnostics as diagnostics
+    from mist_sim.config import for_method
+    config = for_method(config, method)
+    config["diagnostics"]["phase_interval"] = 0
+    config["runtime"]["collection_workers"] = workers
+    config["horizon"] = 4
+    config["k"] = 1
+    config["training"].update(pretrain_slots=4, fast_slots=4, slow_intervals=4, cycles=1, calibration_episodes=1)
+    config["validation"]["enabled"] = False
+    config["monitoring"] = dict(console=False, tensorboard=False)
+    config["ppo"].update(epochs=1, minibatch=8)
+    config["checkpoint_policy"].update(mode="minimal", cycle_interval=10)
+    store = RunStore(Path(__file__).resolve().parents[1], config, "exports-off", 91, output_dir=tmp_path)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Detailed debug export was executed")
+    monkeypatch.setattr(diagnostics, "policy_input_diagnostics", forbidden)
+    monkeypatch.setattr("mist_sim.training.pack_behavior", forbidden)
+    monkeypatch.setattr("mist_sim.training_joint.pack_behavior", forbidden)
+    trainer = Trainer(config, 91, store)
+    buffers = []
+    collect = trainer.collect
+    def tracked(*args, **kwargs):
+        buffer, records = collect(*args, **kwargs)
+        buffers.append(buffer)
+        assert buffer.samples
+        return buffer, records
+    monkeypatch.setattr(trainer, "collect", tracked)
+    try:
+        trainer.run()
+        assert all(buffer.consumed and not buffer.samples for buffer in buffers)
+        assert all(row["parameters_changed"] and not row["detailed_trace"] for row in trainer.history)
+        assert not list((store.path / "traces").rglob("*.json"))
+        assert (store.path / "input_seeds.jsonl").stat().st_size > 0
+        assert (store.path / "metrics.jsonl").stat().st_size > 0
+        with (store.result_path / "cycles.csv").open(encoding="utf-8", newline="") as stream:
+            assert len(list(csv.DictReader(stream))) == 1
+        restored = Trainer.load(store.path / "checkpoints/last.pt")
+        assert len(restored.cycle_history) == 1
+        restored.close()
+    finally:
+        trainer.close()
+        store.finish()
+
+
 @pytest.mark.parametrize("layer", ["upper", "lower"])
 def test_hpgi_detailed_inputs_follow_diagnostic_interval(config, monkeypatch, layer):
     import mist_sim.diagnostics as diagnostics

@@ -20,7 +20,7 @@ from scripts.training.overnight_queue import (
 )
 
 
-def selected_training_config(root, selection_run, suite, seed):
+def selected_training_config(root, selection_run, suite, seed, source_compatibility=None):
     directory = root / "logs/runs" / selection_run
     manifest = read_json(directory / "manifest.json")
     if manifest["status"] != "completed" or manifest.get("exit_code") != 0:
@@ -33,7 +33,8 @@ def selected_training_config(root, selection_run, suite, seed):
     if (root / "pyproject.toml").exists():
         current_source["pyproject.toml"] = digest_file(root / "pyproject.toml")
     if current_source != recorded_source:
-        raise ValueError("Simulator source changed after cut selection")
+        from scripts.maintenance.optimize_training_runtime import verify_selection_compatibility
+        verify_selection_compatibility(root, recorded_source, current_source, source_compatibility)
     config = load_config(root / "configs/conditional.json", [
         root / "configs/algorithms/hpgi_finite_horizon.json",
         root / "configs/algorithms/cuda_update.json",
@@ -64,7 +65,7 @@ def selected_training_config(root, selection_run, suite, seed):
         root / "configs/algorithms/cuda_update.json",
         root / "configs/training/fixed_300.json",
         root / "configs/runtime/windows_performance.json", overlay],
-        ["runtime.collection_workers=2", f"seeds.train={seed}"])
+        [f"seeds.train={seed}"])
     return for_method(config, "fixed_split"), selection
 
 
@@ -77,7 +78,8 @@ def available_dependency(root, runs):
             continue
         if manifest["status"] != "completed" or manifest.get("exit_code") != 0:
             raise RuntimeError(f"Dependency exited unsuccessfully: {run}")
-        if len(cycles(root, run)) != 300:
+        history = read_json(folder / "cycle_history.json")
+        if [row["stage"] for row in history] != [f"cycle_{index:03d}" for index in range(300)]:
             raise RuntimeError(f"Dependency did not finish 300 iterations: {run}")
         return run
     return None
@@ -91,6 +93,7 @@ def main(argv=None):
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--wait-run", action="append", default=[])
     parser.add_argument("--seed", type=int, default=4200001)
+    parser.add_argument("--source-compatibility", type=Path)
     parser.add_argument("--poll-seconds", type=float, default=30)
     parser.add_argument("--max-hours", type=float, default=24)
     args = parser.parse_args(argv)
@@ -148,7 +151,7 @@ def main(argv=None):
             if manifest["status"] != "running":
                 raise RuntimeError("Cut selection failed; no PPO launched")
             time.sleep(args.poll_seconds)
-        config, selection = selected_training_config(root, args.selection_run, suite, args.seed)
+        config, selection = selected_training_config(root, args.selection_run, suite, args.seed, args.source_compatibility)
         config_path = directory / "frozen_training.json"
         write_json(config_path, config)
         config_hash = digest_file(config_path)
@@ -167,7 +170,7 @@ def main(argv=None):
         if digest_file(config_path) != config_hash:
             raise RuntimeError("Frozen training configuration changed")
         # Recheck selection/input hashes at launch, including long queue waits.
-        selected_training_config(root, args.selection_run, suite, args.seed)
+        selected_training_config(root, args.selection_run, suite, args.seed, args.source_compatibility)
         receipt = directory / "exit.json"
         command = terminal_command(root, sys.executable, config_path, args.run_id, args.seed,
                                    receipt, "Fixed-Split PPO | selected cuts | Iteration 1-300 | CUDA")

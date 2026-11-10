@@ -38,7 +38,7 @@ mist-sim/
 
 采用[Python标准src布局](https://packaging.python.org/en/latest/discussions/src-layout-vs-flat-layout/)。日志采用“一个运行一个目录”：PyTorch的[SummaryWriter](https://docs.pytorch.org/docs/stable/tensorboard.html)支持指定log_dir，[CleanRL PPO](https://github.com/vwxyzjn/cleanrl/blob/fe8d8a03c41a7ef5b523e2e354bd01c363e786bb/cleanrl/ppo.py)按run_name隔离事件。本项目统一指定logs/runs，不依赖工具的默认顶层runs目录；该路径是项目约定，并非唯一行业标准。
 
-测试文件和权重在系统临时目录，退出清理；检查/维护脚本默认只打印，确需排障才显式指定输出到tmp。数据剖析归data，不算强化学习实验结果。尚未正式训练时logs/runs与results不放占位文件，也不提前生成空分类。正式训练成功/失败均保留，不按性能好坏删除。
+测试文件和权重在系统临时目录，退出清理；检查/维护脚本默认只打印，确需排障才显式指定输出到tmp。数据剖析归data，不算强化学习实验结果。尚未正式训练时logs/runs与results不放占位文件，也不提前生成空分类。正式训练成功/失败均保留，不按性能好坏删除。conditional正式训练默认关闭整批状态/动作/物理/更新调试JSON（diagnostics.phase_interval=0）；PPO buffer留在内存，绘图CSV、简要日志及低频检查点照常保存。显式排障才设置正整数间隔。
 
 ## 由结果CSV绘图
 

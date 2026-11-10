@@ -141,7 +141,8 @@ class Trainer:
         if trace is None:
             trace = generate_trace(self.config, trace_seed)
         if self.store:
-            self.store.write_json(f"traces/inputs/input_{self.trace_counter:05d}.json", {"seed": trace_seed, "trace": trace})
+            if self.config.get("diagnostics", {}).get("phase_interval", 1) > 0:
+                self.store.write_json(f"traces/inputs/input_{self.trace_counter:05d}.json", {"seed": trace_seed, "trace": trace})
             self.store.record_input_seed(self.trace_counter, trace_seed)
         return Environment(self.config, trace)
 
@@ -233,8 +234,9 @@ class Trainer:
             jobs.append((trace_index, min(per_episode, count - offset)))
             if self.store:
                 traces[trace_index] = generate_trace(self.config, trace_seed)
-                self.store.write_json(f"traces/inputs/input_{self.trace_counter:05d}.json",
-                                      dict(seed=trace_seed, trace=traces[trace_index]))
+                if self.config.get("diagnostics", {}).get("phase_interval", 1) > 0:
+                    self.store.write_json(f"traces/inputs/input_{self.trace_counter:05d}.json",
+                                          dict(seed=trace_seed, trace=traces[trace_index]))
                 self.store.record_input_seed(self.trace_counter, trace_seed)
         preparation_seconds = time.perf_counter() - preparation_started
         outputs = self.collectors.collect(self, jobs, layer, pretrain, traces)
@@ -367,7 +369,7 @@ class Trainer:
         units = self.reward_normalizer.units()
         started = time.perf_counter()
         detail_interval = self.config.get("diagnostics", {}).get("phase_interval", 1)
-        detailed = self.versions[layer] % detail_interval == 0
+        detailed = detail_interval > 0 and self.versions[layer] % detail_interval == 0
         self.event("phase_started", stage=name, layer=layer, target_samples=count)
         for parameter in frozen.parameters():
             parameter.requires_grad_(False)

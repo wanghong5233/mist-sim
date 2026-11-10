@@ -80,7 +80,8 @@ def joint_phase(trainer, name, count):
             trainer.optimizers["joint"].state[parameter] = copy.deepcopy(state)
     settings = trainer.config["ppo"]
     units = trainer.reward_normalizer.units()
-    detailed = len(trainer.completed_stages) % trainer.config.get("diagnostics", {}).get("phase_interval", 1) == 0
+    detail_interval = trainer.config.get("diagnostics", {}).get("phase_interval", 1)
+    detailed = detail_interval > 0 and len(trainer.completed_stages) % detail_interval == 0
     started = time.perf_counter()
     trainer.event("phase_started", stage=name, layer="joint", target_samples=count)
     buffer, records = trainer.collect("joint", count)
