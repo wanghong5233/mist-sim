@@ -1,5 +1,7 @@
 # 测试范围
 
+test_hpgi_split_transfer.py检查固定提案在完整微型闭环中逐动作/概率/价值/特征复现Fixed-Split，切分搜索的联合可行性/不增成本与接纳/服务器保持，原潜在提案的串行/批量概率，以及真实CPU/CUDA更新、并行bootstrap、迁移来源、Adam/新计数、独立物理回放和严格恢复拒用。它不证明新方法全局最优或多种子优越。
+
 test_fixed_split_selection.py覆盖全部合法组合、配对开发输入完整性、按物理槽聚合原目标成本、非有限得分拒用、真实环境执行固定点、原输入不变，以及选择overlay真正进入独立300轮Fixed-Split配置；选择文件篡改须失败。只做微型环境执行和配置流转，不启动正式训练。
 
 test_process_runtime.py检查默认不改OS、非Windows显式拒用、配置布尔校验、200轮预算不提前稳定退出和Trainer入口；Windows子进程通过实际API读回AboveNormal及显式关闭的EXECUTION_SPEED。只修改测试子进程自身，退出后释放，不更改系统电源设置。
