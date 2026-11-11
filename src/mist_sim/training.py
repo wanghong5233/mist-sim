@@ -105,6 +105,7 @@ class Trainer:
         self.collection_stop = None
         self.collection_trace = None
         self.collection_timings = {}
+        self.transfer_provenance = None
 
     def close(self):
         if self.collectors is not None:
@@ -487,7 +488,8 @@ class Trainer:
             raise ValueError("extra_cycles must be a nonnegative integer")
         if not (self.controller.learn_lower or self.controller.learn_upper):
             raise ValueError("Heuristic baseline uses evaluate, not train")
-        schedule = describe_schedule(self.config, extra_cycles, self.completed_stages)
+        schedule = describe_schedule(self.config, extra_cycles, self.completed_stages,
+                                     inherited_pretraining=self.transfer_provenance is not None)
         self.event("training_started", schedule=schedule,
                    resumed_stages=len(self.completed_stages), max_seconds=max_seconds, max_slots=max_slots,
                    process_policy=self.process_policy)
@@ -680,7 +682,7 @@ class Trainer:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"schema": CHECKPOINT_SCHEMA, "config": self.config, "signature": signature(self.config),
                    "implementation_signature": implementation_signature(), "resumable": not self.phase_in_progress,
-                   "seed": self.seed, "controller": self.controller.state_dict(),
+                   "seed": self.seed, "controller": self.controller.state_dict(), "transfer": self.transfer_provenance,
                    "reward_normalizer": self.reward_normalizer.state_dict(),
                    "value_reward_scales": self.value_reward_scales,
                    "optimizers": {key: optimizer.state_dict() for key, optimizer in self.optimizers.items()},
@@ -723,6 +725,7 @@ class Trainer:
             setattr(trainer, key, payload[key])
         random.setstate(payload["rng"]["python"])
         trainer.cycle_history = payload.get("cycle_history", [])
+        trainer.transfer_provenance = payload.get("transfer")
         np.random.set_state(payload["rng"]["numpy"])
         torch.set_rng_state(payload["rng"]["torch"])
         return trainer

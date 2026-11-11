@@ -94,6 +94,8 @@ def upper_choices(observation):
 
 def upper_frame(observation):
     config, active = observation["config"], observation["active"]
+    from .split_solver import proposal_config
+    config = proposal_config(config)
     history = observation["history"] if config["long_term_feedback"] else []
     profiles = Profiles(config)
     server_rows = server_features(config, active, active, history)
@@ -111,6 +113,8 @@ def upper_frame(observation):
 
 
 def lower_frame(problem):
+    from .split_solver import proposal_problem
+    problem = proposal_problem(problem)
     server_rows = server_features(problem.config, problem.active, problem.ready, problem.history)
     return {"servers": server_rows,
             "items": [item_features(choice, problem.config) for options in problem.choices for choice in options],
@@ -287,6 +291,8 @@ class SetPolicy(nn.Module):
 
     @torch.no_grad()
     def lower_action(self, problem, deterministic=False, record=True, cached=None):
+        from .split_solver import proposal_problem
+        problem = proposal_problem(problem)
         frame = cached[0] if cached is not None else lower_frame(problem)
         usage = problem.empty_usage()
         allocated, owners = [], []

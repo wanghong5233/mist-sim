@@ -132,11 +132,20 @@ def validate(config):
                "fading_range", "generalization_divisions", "local_rate", "local_kappa", "tx_power",
                "noise_density", "interference", "gain_reference", "reserved_bandwidth", "anonymization_seconds",
                "control_seconds", "backhaul_seconds", "lambda_time", "rejection_cost", "capacity_mask",
-               "learned_rates", "fixed_split", "long_term_feedback", "dynamic_split", "initial_active",
+               "learned_rates", "fixed_split", "long_term_feedback", "dynamic_split", "initial_active", "split_solver", "split_refinement_passes",
                "history_slots", "servers", "access_points", "units", "profiles", "ppo", "ppo_layers",
                "training", "seeds", "device", "validation", "checkpoint_policy", "reward_normalization", "monitoring", "stopping", "runtime", "convergence", "trace_retention", "diagnostics"}
     if set(config) - allowed:
         raise ValueError(f"Unknown configuration keys: {set(config) - allowed}")
+    solver = config.get("split_solver", "policy")
+    passes = config.get("split_refinement_passes", 1 if solver == "fixed_proposal" else 0)
+    if solver not in ("policy", "fixed_proposal") or type(passes) is not int or not 0 <= passes <= 2:
+        raise ValueError("Invalid split solver or bounded refinement passes")
+    if solver == "fixed_proposal" and (config["method"] != "hpgi" or config["learned_rates"] or
+                                      not config["capacity_mask"] or config.get("dynamic_split") is False):
+        raise ValueError("Fixed proposals require dynamic HPGI, capacity masks and P3")
+    if solver == "policy" and passes:
+        raise ValueError("Refinement passes require fixed_proposal")
     monitoring = config.get("monitoring", {"tensorboard": False, "console": True})
     if set(monitoring) != {"tensorboard", "console"} or any(type(value) is not bool for value in monitoring.values()):
         raise ValueError("Invalid monitoring settings")
@@ -234,7 +243,7 @@ def validate(config):
             raise ValueError("Unknown AP")
     if any(access["bandwidth"] <= 0 for access in config["access_points"]):
         raise ValueError("Invalid AP bandwidth")
-    if config["method"] == "fixed_split" or config.get("dynamic_split") is False:
+    if config["method"] == "fixed_split" or config.get("dynamic_split") is False or solver == "fixed_proposal":
         if isinstance(config["fixed_split"], dict) and set(config["fixed_split"]) != set(config["profiles"]):
             raise ValueError("Fixed split mapping must cover every model")
         if any(fixed_split_for(config, name) not in model["legal_splits"] for name, model in config["profiles"].items()):

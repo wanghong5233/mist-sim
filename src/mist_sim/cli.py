@@ -29,6 +29,8 @@ def main(argv=None):
     parser.add_argument("--device", choices=("cpu", "cuda"), help="PPO update device; environment and sampling stay on CPU")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--checkpoint", type=Path)
+    parser.add_argument("--transfer-from", type=Path, help="New HPGI experiment from audited parent weights; resets Adam and counters")
+    parser.add_argument("--parent-source-revision", help="Exact audited legacy source commit for transfer")
     parser.add_argument("--trace", type=Path)
     parser.add_argument("--records", type=Path)
     parser.add_argument("--run-id")
@@ -43,6 +45,10 @@ def main(argv=None):
     parser.add_argument("--measured-latency", action="store_true")
     args = parser.parse_args(argv)
     args.invocation = " ".join(sys.argv if argv is None else argv)
+    if args.transfer_from and (args.command != "train" or args.checkpoint or not args.config or args.seed is None):
+        parser.error("--transfer-from requires train, explicit --config/--seed, and excludes --checkpoint")
+    if args.parent_source_revision and not args.transfer_from:
+        parser.error("--parent-source-revision requires --transfer-from")
     if (args.dry_run or args.max_slots is not None or args.max_seconds is not None) and args.command != "train":
         parser.error("--dry-run/--max-slots/--max-seconds require train")
     if args.extra_cycles < 0 or (args.max_slots is not None and args.max_slots <= 0):
@@ -82,10 +88,14 @@ def execute(args):
         if args.device is not None:
             config["device"] = args.device
         trainer = None
+    if args.transfer_from:
+        from .transfer import initialize_transfer
+        trainer = initialize_transfer(args.transfer_from, config, args.seed, source_revision=args.parent_source_revision)
     if args.command == "train" and config["method"] == "greedy_consolidation":
         raise ValueError("Heuristic baseline uses evaluate, not train")
     if args.dry_run:
-        schedule = describe_schedule(config, args.extra_cycles, trainer.completed_stages if trainer else ())
+        schedule = describe_schedule(config, args.extra_cycles, trainer.completed_stages if trainer else (),
+                                     inherited_pretraining=trainer is not None and trainer.transfer_provenance is not None)
         schedule["stopping"] = dict(config["stopping"])
         for name in ("max_slots", "max_seconds"):
             if getattr(args, name) is not None:
@@ -124,6 +134,9 @@ def run_command(args, config, trainer):
                 if args.seed is not None and args.seed != trainer.seed:
                     raise ValueError("Resume seed cannot change")
                 trainer.store = store
+                if trainer.transfer_provenance is not None:
+                    store.manifest["transfer"] = trainer.transfer_provenance
+                    store.write_json("manifest.json", store.manifest)
             trainer.run(args.extra_cycles, max_seconds=args.max_seconds, max_slots=args.max_slots)
             store.write_json("summary.json", {"stages": trainer.completed_stages, "total_slots": trainer.total_slots,
                                               "stop_reason": trainer.stop_reason})

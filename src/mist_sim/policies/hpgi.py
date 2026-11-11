@@ -30,6 +30,22 @@ class Controller:
     def fast(self, problem, deterministic=False, record=True, cached=None):
         if not self.learn_lower:
             return greedy_fast(problem)
+        if self.config.get("split_solver", "policy") == "fixed_proposal":
+            from .split_solver import proposal_problem, map_actions, refine_splits
+            proposal = proposal_problem(problem)
+            actions, predicted, sample = self.lower.lower_action(proposal, deterministic, record=record, cached=cached)
+            mapped = map_actions(proposal, problem, actions)
+            passes = self.config.get("split_refinement_passes", 1)
+            if passes:
+                executed, detail = refine_splits(problem, mapped, passes)
+            else:
+                executed, detail = mapped, dict(changes=0, p3_solves=0)
+            if sample is not None:
+                # PPO scores the sampled latent proposal. The solver is part of
+                # its transition kernel; executed actions are never relabeled.
+                sample["executed_actions"] = executed
+                sample["split_refinement"] = detail
+            return executed, predicted, sample
         return self.lower.lower_action(problem, deterministic, record=record, cached=cached)
 
     def state_dict(self):

@@ -1,0 +1,10 @@
+{
+  "method": "hpgi",
+  "dynamic_split": true,
+  "split_solver": "fixed_proposal",
+  "split_refinement_passes": 1,
+  "ppo": {
+    "value_model": "finite_horizon",
+    "value_target": "sampled_return"
+  }
+}
