@@ -12,7 +12,7 @@ from .anonymity import generate_trace
 from .environment import Environment
 from .buffers import RolloutBuffer
 from .evaluation import evaluate, summarize
-from .policies.hpgi import Controller
+from .policies.registry import make_controller
 from .policies.networks import upper_frame, lower_frame
 from .ppo import update
 from .traces import pack_behavior
@@ -70,7 +70,7 @@ class Trainer:
         np.random.seed(seed)
         torch.manual_seed(seed)
         torch.set_num_threads(config.get("runtime", {}).get("torch_threads", 1))
-        self.controller = Controller(config)
+        self.controller = make_controller(config)
         self.reward_normalizer = RunningRewardNormalizer(config)
         self.value_reward_scales = {"upper": None, "lower": None}
         self.optimizers = {layer: torch.optim.Adam(getattr(self.controller, layer).parameters(),

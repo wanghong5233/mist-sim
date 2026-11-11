@@ -8,7 +8,7 @@ from .config import load_config, for_method, METHODS, default_project_root
 from .anonymity import generate_trace
 from .environment import Environment
 from .evaluation import evaluate, replay, summarize
-from .policies.hpgi import Controller
+from .policies.registry import make_controller
 from .reference_solvers import enumerate_slot, enumerate_trajectory
 from .storage import RunStore, write_json, digest_file, validation_workspace
 from .training import Trainer
@@ -29,7 +29,7 @@ def main(argv=None):
     parser.add_argument("--device", choices=("cpu", "cuda"), help="PPO update device; environment and sampling stay on CPU")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--checkpoint", type=Path)
-    parser.add_argument("--transfer-from", type=Path, help="New HPGI experiment from audited parent weights; resets Adam and counters")
+    parser.add_argument("--transfer-from", type=Path, help="New HPGI/HARP development experiment from audited weights; resets Adam and counters")
     parser.add_argument("--parent-source-revision", help="Exact audited legacy source commit for transfer")
     parser.add_argument("--trace", type=Path)
     parser.add_argument("--records", type=Path)
@@ -175,7 +175,7 @@ def run_command(args, config, trainer):
             else:
                 if args.command == "evaluate" and trainer is None and config["method"] != "greedy_consolidation":
                     raise ValueError("Learned methods require their own checkpoint")
-                controller = trainer.controller if trainer else Controller(for_method(config, "greedy_consolidation"))
+                controller = trainer.controller if trainer else make_controller(for_method(config, "greedy_consolidation"))
                 if args.command == "check" and config["learned_rates"] and trainer is None:
                     controller = KernelCheckController(config)
                 records, metrics = evaluate(controller, config, trace, args.measured_latency)

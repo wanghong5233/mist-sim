@@ -1,0 +1,14 @@
+{
+  "method": "harp",
+  "information": "robust",
+  "capacity_mask": true,
+  "learned_rates": false,
+  "dynamic_split": true,
+  "split_solver": "fixed_proposal",
+  "split_refinement_scope": "assignment",
+  "split_refinement_passes": 1,
+  "ppo": {
+    "value_model": "finite_horizon",
+    "value_target": "sampled_return"
+  }
+}

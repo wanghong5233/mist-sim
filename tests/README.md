@@ -1,5 +1,7 @@
 # 测试范围
 
+test_harp.py检查HARP/原HPGI/历史混合的独立控制器身份、切换方法不泄漏求解标志、配置不能悄悄变成零遍或仅切分版本、原HPGI不调用新搜索；同权重/RNG下HARP与历史assignment路径的物理执行和原提案概率一致。显式迁移与从头初始化分开，物理合同变化/重标恢复须失败。公共CLI闭环test_baseline_interfaces.py也覆盖HARP的CPU与CUDA双worker：校准/预训练、两层冻结更新、CSV、独立物理复算、评价/回放/汇总及重载继续。微型检查不冒充收敛或性能实验。
+
 test_assignment_solver.py用手算AP瓶颈验证单点不可改善、成对释放/接纳才改善的反例；枚举小型全部动作核对缓存P3与公共分配器成本一致，检查下界、输入不变、联合容量和总接纳数保持。test_hpgi_split_transfer.py同时覆盖联合搜索原提案概率、CPU/CUDA更新及严格恢复；不由小型检查证明完整训练有效。
 
 test_hpgi_split_transfer.py检查固定提案在完整微型闭环中逐动作/概率/价值/特征复现Fixed-Split，切分搜索的联合可行性/不增成本与接纳/服务器保持，原潜在提案的串行/批量概率，以及真实CPU/CUDA更新、并行bootstrap、迁移来源、Adam/新计数、独立物理回放和严格恢复拒用。它不证明新方法全局最优或多种子优越。
@@ -16,7 +18,7 @@ test_learning_quality.py用手算反例检查非线性时间偏差、终止处�
 
 test_baseline_interfaces.py覆盖其余七个学习基线的CPU/CUDA训练→评价→CSV→重放/汇总→续训；GPU路径用2worker覆盖并行采样，5槽episode检查尾区间。独立复算GAE/loss/服务分母/能耗，检查冻结组件、原行为概率、方法约束及续训权重一致。另查纯贪心无需训练、层级--set校验、单层校准不调用无用网络、进度编号、输入文件来源、minimal检查点，以及Fixed-Window投影前动作/潜变量的CPU与CUDA批量梯度。产物在系统临时目录内自动清理。
 
-test_hpgi_efficiency.py检查交替组件的重型输入诊断门控、global/phase标准化及参数更新等价、公共加速overlay、4worker/CUDA的预训练/交替/恢复、冻结层不变、行为版本刷新与旧buffer拒用；保存记录由独立GAE/loss和物理检查复算。另覆盖finite_horizon/sampled_return的CPU串行/双worker交替、非单位gamma、尾区间、截断bootstrap、奖励单位冻结及重载续训。
+test_hpgi_efficiency.py检查交替组件的重型输入诊断门控、global/phase标准化及参数更新等价、公共加速overlay、原HPGI及HARP的4worker/CUDA预训练/交替/恢复、冻结层不变、行为版本刷新与旧buffer拒用；保存记录由独立GAE/loss和物理检查复算。另覆盖finite_horizon/sampled_return的CPU串行/双worker交替、非单位gamma、尾区间、截断bootstrap、奖励单位冻结及重载续训。
 
 test_sampling_efficiency.py检查采样缓存命中不重建候选、环境复用已验证剖面、输入轨迹只生成一次、缓存返回值隔离，以及宽数值尺度P3容量/KKT；还检查分组件优势标准化、单元素/常量组、配置与dry-run及独立loss复算。rollout诊断记录更新前分组件优势、时隙相关性和价值拟合；不以更新后的explained variance代替动作收益证据。CPU/CUDA等价更新同时覆盖global和phase标准化。
 

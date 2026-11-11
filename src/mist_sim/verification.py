@@ -10,7 +10,7 @@ import torch
 from .anonymity import generate_trace
 from .config import METHODS, for_method, load_config
 from .evaluation import evaluate, replay, assert_close
-from .policies.hpgi import Controller
+from .policies.registry import make_controller
 from .storage import RunStore, digest_file, write_json, validation_workspace
 from .training import Trainer, parameter_hash
 
@@ -46,7 +46,7 @@ def verify_one(root, config, seed, output_dir):
     trainer = None
     try:
         if config["method"] == "greedy_consolidation":
-            controller = Controller(config)
+            controller = make_controller(config)
         else:
             trainer = Trainer(config, seed, store)
             trainer.run()

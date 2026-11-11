@@ -2,6 +2,8 @@
 
 从mist-sim根运行；本机解释器固定`D:/Anaconda/envs/pytorch/python.exe`。scripts只编排，公共实现属于src/mist_sim。训练/评价/重放使用`python -m mist_sim`，见[工程README](../README.md)。
 
+新主算法使用`python -m mist_sim train --method harp`及`configs/algorithms/harp*.json`，选点与场景配置按README叠加；原`--method hpgi`是原版对照。下表`develop_hpgi.py/compare_hpgi_refinement.py`保留历史开发语义（hpgi+fixed_proposal），不会自动把输出重标成HARP从头实验；后续机制诊断入口的补齐由项目计划单列。
+
 |目录|入口|用途|
 |---|---|---|
 |evaluation/|compare_hpgi_refinement.py --parent Fixed的last.pt --parent-revision 完整提交 --seeds 开发种子列表 --output results/comparisons/名称|相同成熟Fixed权重及相同请求下比较固定切分、仅切分优化、联合指派/接纳交换；4个CPU进程，无训练/详细轨迹。运行前保存配置/来源/种子，逐轨迹CSV含成本、服务、能耗及实测推理时间；校验输入配对和父权重未变。属于开发机制比较，不代替从头多种子|

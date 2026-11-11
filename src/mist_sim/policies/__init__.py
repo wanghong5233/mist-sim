@@ -1,1 +1,1 @@
-"""Policy implementations will share the MIST environment and evaluator."""
+"""Pluggable MIST controllers; explicit method dispatch lives in registry.py."""

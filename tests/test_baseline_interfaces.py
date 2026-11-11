@@ -23,7 +23,8 @@ from mist_sim.verification import independent_totals
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LEARNING_BASELINES = [method for method in METHODS if method not in
+# Include the independent HARP controller in the shared public CLI contract.
+LEARNING_METHODS = [method for method in METHODS if method not in
                       ("hpgi", "joint_ppo", "greedy_consolidation")]
 
 
@@ -59,7 +60,7 @@ def test_layer_overrides_use_same_validation_as_overlays():
             load_config(ROOT / "configs/smoke.json", overrides=[invalid])
 
 
-@pytest.mark.parametrize("method", ["always_on", "upper_ppo_greedy", "hpgi", "joint_ppo"])
+@pytest.mark.parametrize("method", ["always_on", "upper_ppo_greedy", "hpgi", "harp", "joint_ppo"])
 @pytest.mark.parametrize("validation", [False, True])
 def test_console_counts_actual_components(config, method, validation):
     config = for_method(config, method)
@@ -128,7 +129,7 @@ def test_invalid_trace_envelope_fails(config, tmp_path, payload):
 
 @pytest.mark.parametrize("device", ["cpu", pytest.param("cuda",
     marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required"))])
-@pytest.mark.parametrize("method", LEARNING_BASELINES)
+@pytest.mark.parametrize("method", LEARNING_METHODS)
 def test_learning_baseline_cli_roundtrip(config, tmp_path, method, device):
     config = baseline_config(config, device)
     filename, tracefile = tmp_path / "config.json", tmp_path / "trace.json"

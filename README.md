@@ -1,6 +1,6 @@
 # MIST 仿真实验工程
 
-`mist-sim/`是独立仿真工程与Git仓库根，`src/mist_sim/`是Python导入包。仓库实现环境、交替HPGI和joint_ppo两个候选、全部基线及训练/评价流程。初稿提供设计假设，不作为算法正确性标准；实现依据强化学习语义核验，主算法选择依据实际数据与实验对照。
+`mist-sim/`是独立仿真工程与Git仓库根，`src/mist_sim/`是Python导入包。MIST是系统框架；HARP是独立的分层PPO与联合指派改进算法，原版HPGI及joint_ppo保留为比较方法。全部方法共用环境及训练/评价基础设施。初稿提供设计假设，不作为算法正确性标准；主算法效果由实际对照决定。
 
 ## 仓库与隐私
 
@@ -66,16 +66,19 @@ mist-sim/
 
 ## 方法与模块
 
-HPGI开发分支可用`configs/algorithms/hpgi_split_refined.json`：网络给出固定点约束下的接纳/服务器提案，公开成本/P3对已接纳边缘任务做一遍同服务器切分优化。原HPGI及全部基线默认不变。该候选尚不代表最终论文方法；只保证同状态下本次局部搜索不增保守成本，完整闭环效果以实测为准。
+**HARP（Hierarchical Assignment Refinement with PPO，分层PPO与联合指派改进）**使用`--method harp`或`configs/algorithms/harp.json`。上层PPO控制启停，下层PPO在离线固定点集合上提出接纳/本地/服务器方案，联合求解器在完整动态集合上改进接纳、关联和切分，并调用P3比较成本。默认一次坐标扫描和接纳/释放交换；只接受联合可行、严格降成本且不减少总接纳数的操作。PPO使用原提案及概率，环境执行改进动作。它没有新增第三个网络，仍复用原双层网络、PPO更新与CPU采样。
 
-`configs/algorithms/hpgi_assignment_refined.json`进一步启用`split_refinement_scope=assignment`，用一次坐标改进及接纳/释放交换联合调整本地执行、接纳、服务器和切分。只接受联合可行、严格降成本且不减少总接纳数的操作，上层开关仍由PPO决定；原提案及概率进入PPO，执行动作独立记录。按槽缓存P3及成本下界剪枝限制开销，详细范围见IMPLEMENTATION。此分支支持从头训练，不能将成熟网络上的开发收益当作已完成从头训练比较。
+代码通过`policies/registry.py:make_controller`分派：`harp.py:HARPController`负责新算法，`hpgi.py:HPGIController`负责原HPGI，`base.py`仅共用网络、慢层控制和权重接口。Trainer、CLI、worker、评价与检查点均使用同一注册入口。方法名进入配置、manifest和自动运行ID；新运行分别写入`logs/runs/<运行ID>`及`results/<同一运行ID>`，不另建一套环境或日志系统。
 
-该分支依赖当前场景的离线选点：新配置须叠加`select_fixed_split`导出的`selected_overlay.json`并保留其凭据；不能把原演示固定点直接用于科研实验。迁移开发使用成熟Fixed-Split的原配置及检查点，继承它已经冻结的选点；算力、带宽、负载等场景改变后须重新选择。切分求解仍有额外计算成本，实际收益和耗时需同时报告。
+历史`hpgi_split_refined.json`与`hpgi_assignment_refined.json`保留原内容，由`legacy_refined.py`明确兼容；它们是旧混合实验，不能当作原版HPGI或改名后的HARP正式结果。新HARP使用独立预设；`harp_finite_horizon.json`另选择共享finite_horizon/sampled_return价值估计。HARP本身不加载任何成熟权重，只有显式`--transfer-from`才迁移。
+
+HARP依赖当前场景的离线选点：须叠加`select_fixed_split`导出的`selected_overlay.json`并保留其凭据；原演示固定点不用于科研实验。成熟网络开发继承父配置冻结的选点；算力、带宽、负载等改变后须重新选择。切分求解有额外计算成本，收益和耗时需同时报告。原HPGI已经包含P3；HARP增加的是离散联合改进。
 
 显式迁移与严格恢复分开。`train --config <新配置> --transfer-from <父last.pt> --parent-source-revision <已审计完整提交> --seed <新种子> --run-id <新名称>`继承网络/归一化/价值单位，重置Adam、RNG及训练计数，跳过已继承预训练，并记录父哈希/配置及成本。它是新实验，不能把开发曲线当独立从头训练结果；物理/奖励/表示及折扣不兼容会拒绝。`--checkpoint`仍严格检查源码与配置，不能用来改参续训。限定5轮的配对开发入口见[scripts](scripts/README.md)。
 
 |方法键|实际差异|训练组件|
 |---|---|---|
+|harp|固定点PPO提案、动态联合指派改进、容量掩码及P3|开关/调度交替PPO|
 |hpgi|容量掩码、P3|开关/调度交替PPO|
 |joint_ppo|同轨迹阶段条件联合PPO；保留Q槽开关和逐槽调度|开关/调度联合PPO|
 |always_on|服务器全开|仅调度PPO|
@@ -122,6 +125,20 @@ Always-On公平物理预算入口：`python -m mist_sim train --config configs/c
 ```
 
 占位ID替换为实际运行路径；学习方法必须加载自己的权重。`--overlay 文件.json`和`--set ppo.learning_rate=0.0001`严格覆盖配置，未知键报错；上下层可通过`--set ppo_layers.upper.minibatch=64`独立配置。变更源码/配置/剖面后拒绝无说明续训。
+
+HARP的无采样入口检查可用：
+
+```powershell
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/smoke.json --method harp --dry-run
+```
+
+正式场景先确认选点结果，用实际选择ID替换下列占位，`--dry-run`只预览、不建运行目录：
+
+```powershell
+& D:/Anaconda/envs/pytorch/python.exe -m mist_sim train --config configs/conditional.json --overlay results/<选择ID>/selected_overlay.json --overlay configs/algorithms/harp_finite_horizon.json --overlay configs/algorithms/cuda_update.json --overlay configs/training/fixed_300.json --overlay configs/runtime/windows_performance.json --set checkpoint_policy.cycle_interval=10 --seed 4200001 --dry-run
+```
+
+确认实验预算后移除`--dry-run`才正式启动；不传`--checkpoint/--transfer-from`即从头初始化。通用`--method harp`安装算法必需的求解设置；切换离开HARP会清除其求解标志，防止污染基线。旧配置不加新默认键，旧运行不得靠重标方法恢复；源码签名改变后，继续旧实验须使用其原版匹配checkout。
 
 固定200轮的HPGI及Windows后台运行试验：
 

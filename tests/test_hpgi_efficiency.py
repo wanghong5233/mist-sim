@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import torch
 
-from mist_sim.config import layer_settings
+from mist_sim.config import for_method, layer_settings
 from mist_sim.diagnostics import check_update, inspect_run
 from mist_sim.ppo import update
 from mist_sim.storage import RunStore
@@ -191,7 +191,9 @@ def test_hpgi_finite_value_tail_discount_freezing_and_resume(config, tmp_path, m
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
-def test_hpgi_cuda_four_workers_freezing_fresh_buffers_and_resume(config, tmp_path, monkeypatch):
+@pytest.mark.parametrize("method", ["hpgi", "harp"])
+def test_hierarchical_cuda_four_workers_freezing_fresh_buffers_and_resume(config, tmp_path, monkeypatch, method):
+    config = for_method(config, method)
     config["device"] = "cuda"
     config["runtime"]["collection_workers"] = 4
     config["horizon"] = 5

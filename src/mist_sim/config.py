@@ -5,7 +5,7 @@ import json
 import math
 from pathlib import Path
 
-METHODS = ("hpgi", "joint_ppo", "always_on", "fixed_split", "single_timescale", "fixed_window",
+METHODS = ("harp", "hpgi", "joint_ppo", "always_on", "fixed_split", "single_timescale", "fixed_window",
            "upper_ppo_greedy", "greedy_consolidation", "nominal", "full_information")
 OPTIONAL_SOLVER_KEYS = frozenset(("dynamic_split", "split_solver", "split_refinement_passes", "split_refinement_scope"))
 
@@ -110,6 +110,9 @@ def layer_settings(config, layer):
 
 def for_method(config, method):
     result = copy.deepcopy(config)
+    if config["method"] == "harp" and method != "harp":
+        for key in OPTIONAL_SOLVER_KEYS:
+            result.pop(key, None)
     result["method"] = method
     if method not in METHODS:
         raise ValueError(f"Unknown method: {method}")
@@ -119,6 +122,10 @@ def for_method(config, method):
     result["learned_rates"] = method == "fixed_window"
     if method == "fixed_window":
         result["capacity_mask"] = False
+    if method == "harp":
+        result.update(dynamic_split=True, split_solver="fixed_proposal",
+                      split_refinement_scope="assignment", capacity_mask=True)
+        result.setdefault("split_refinement_passes", 1)
     validate(result)
     return result
 
@@ -143,14 +150,17 @@ def validate(config):
     passes = config.get("split_refinement_passes", 1 if solver == "fixed_proposal" else 0)
     if solver not in ("policy", "fixed_proposal") or type(passes) is not int or not 0 <= passes <= 2:
         raise ValueError("Invalid split solver or bounded refinement passes")
-    if solver == "fixed_proposal" and (config["method"] != "hpgi" or config["learned_rates"] or
+    if solver == "fixed_proposal" and (config["method"] not in ("hpgi", "harp") or config["learned_rates"] or
                                       not config["capacity_mask"] or config.get("dynamic_split") is False):
-        raise ValueError("Fixed proposals require dynamic HPGI, capacity masks and P3")
+        raise ValueError("Fixed proposals require dynamic HPGI/HARP, capacity masks and P3")
     if solver == "policy" and passes:
         raise ValueError("Refinement passes require fixed_proposal")
     scope = config.get("split_refinement_scope", "splits")
     if scope not in ("splits", "assignment") or (scope != "splits" and solver != "fixed_proposal"):
         raise ValueError("Invalid split refinement scope")
+    if config["method"] == "harp" and (solver != "fixed_proposal" or scope != "assignment" or
+            passes < 1 or config.get("dynamic_split") is not True or config["information"] != "robust"):
+        raise ValueError("HARP requires robust dynamic assignment refinement with positive bounded passes")
     monitoring = config.get("monitoring", {"tensorboard": False, "console": True})
     if set(monitoring) != {"tensorboard", "console"} or any(type(value) is not bool for value in monitoring.values()):
         raise ValueError("Invalid monitoring settings")

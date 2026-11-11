@@ -42,8 +42,8 @@ def read_parent(path, source_revision=None):
         if digest.hexdigest() != parent_signature:
             raise ValueError("Recorded source does not reproduce parent implementation signature")
     validate(payload["config"])
-    if payload["config"]["method"] not in ("hpgi", "fixed_split"):
-        raise ValueError("Audited transfer supports HPGI/Fixed-Split parents only")
+    if payload["config"]["method"] not in ("hpgi", "harp", "fixed_split"):
+        raise ValueError("Audited transfer supports HPGI/HARP/Fixed-Split parents only")
     return payload, dict(path=str(path), sha256=digest_file(path),
         implementation_signature=parent_signature, source_revision=source_revision,
         config_signature=payload["signature"], seed=payload["seed"],
@@ -68,7 +68,7 @@ def initialize_transfer(path, config, seed, store=None, source_revision=None):
                 return {k: v for k, v in settings.items() if k not in ("learning_rate", "entropy_coefficient")}
             return {k: {a: b for a, b in v.items() if a not in ("learning_rate", "entropy_coefficient")} for k, v in settings.items()}
         before[section], after[section] = strip(before.get(section, {})), strip(after.get(section, {}))
-    if before != after or config["method"] != "hpgi":
+    if before != after or config["method"] not in ("hpgi", "harp"):
         raise ValueError("Transfer changed a noncompatible physical/representation/learning contract")
     if seed % 10000 == payload["seed"] % 10000:
         raise ValueError("Transfer must use a fresh training substream")
