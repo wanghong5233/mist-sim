@@ -68,6 +68,8 @@ mist-sim/
 
 HPGI开发分支可用`configs/algorithms/hpgi_split_refined.json`：网络给出固定点约束下的接纳/服务器提案，公开成本/P3对已接纳边缘任务做一遍同服务器切分优化。原HPGI及全部基线默认不变。该候选尚不代表最终论文方法；只保证同状态下本次局部搜索不增保守成本，完整闭环效果以实测为准。
 
+`configs/algorithms/hpgi_assignment_refined.json`进一步启用`split_refinement_scope=assignment`，用一次坐标改进及接纳/释放交换联合调整本地执行、接纳、服务器和切分。只接受联合可行、严格降成本且不减少总接纳数的操作，上层开关仍由PPO决定；原提案及概率进入PPO，执行动作独立记录。按槽缓存P3及成本下界剪枝限制开销，详细范围见IMPLEMENTATION。此分支支持从头训练，不能将成熟网络上的开发收益当作已完成从头训练比较。
+
 该分支依赖当前场景的离线选点：新配置须叠加`select_fixed_split`导出的`selected_overlay.json`并保留其凭据；不能把原演示固定点直接用于科研实验。迁移开发使用成熟Fixed-Split的原配置及检查点，继承它已经冻结的选点；算力、带宽、负载等场景改变后须重新选择。切分求解仍有额外计算成本，实际收益和耗时需同时报告。
 
 显式迁移与严格恢复分开。`train --config <新配置> --transfer-from <父last.pt> --parent-source-revision <已审计完整提交> --seed <新种子> --run-id <新名称>`继承网络/归一化/价值单位，重置Adam、RNG及训练计数，跳过已继承预训练，并记录父哈希/配置及成本。它是新实验，不能把开发曲线当独立从头训练结果；物理/奖励/表示及折扣不兼容会拒绝。`--checkpoint`仍严格检查源码与配置，不能用来改参续训。限定5轮的配对开发入口见[scripts](scripts/README.md)。

@@ -37,7 +37,11 @@ class Controller:
             mapped = map_actions(proposal, problem, actions)
             passes = self.config.get("split_refinement_passes", 1)
             if passes:
-                executed, detail = refine_splits(problem, mapped, passes)
+                if self.config.get("split_refinement_scope", "splits") == "assignment":
+                    from .assignment_solver import refine_assignments
+                    executed, detail = refine_assignments(problem, mapped, passes)
+                else:
+                    executed, detail = refine_splits(problem, mapped, passes)
             else:
                 executed, detail = mapped, dict(changes=0, p3_solves=0)
             if sample is not None:

@@ -62,8 +62,10 @@ def test_restricted_features_bootstrap_and_complete_policy_reproduce_fixed(confi
         assert ra["tasks"] == rb["tasks"]
 
 
-def test_refinement_is_feasible_and_keeps_latent_probability(config):
+@pytest.mark.parametrize("scope", ["splits", "assignment"])
+def test_refinement_is_feasible_and_keeps_latent_probability(config, scope):
     config = hybrid(small(config))
+    config["split_refinement_scope"] = scope
     env = Environment(config, generate_trace(config, 91))
     controller = Controller(config)
     while not env.done:
@@ -87,6 +89,18 @@ def test_refinement_is_feasible_and_keeps_latent_probability(config):
     replay(config, env.records)
 
 
+def test_assignment_from_scratch_includes_calibration_pretraining_and_both_layers(config):
+    torch.set_num_threads(1)
+    target = hybrid(small(config))
+    target["split_refinement_scope"] = "assignment"
+    trainer = Trainer(target, 91)
+    trainer.run()
+    assert trainer.calibrated and "pretrain" in trainer.completed_stages
+    assert trainer.transfer_provenance is None
+    assert trainer.versions["upper"] >= 1 and trainer.versions["lower"] >= 2
+    assert all(row["parameters_changed"] and row["frozen_unchanged"] for row in trainer.history)
+
+
 @pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA"))])
 def test_transfer_fresh_update_parallel_bootstrap_and_strict_resume(config, tmp_path, device):
     config = for_method(small(config), "fixed_split")
@@ -95,6 +109,7 @@ def test_transfer_fresh_update_parallel_bootstrap_and_strict_resume(config, tmp_
     path = tmp_path / "parent.pt"
     parent.save(path)
     target = hybrid(config)
+    target["split_refinement_scope"] = "assignment"
     target["device"] = device
     target["runtime"]["collection_workers"] = 2 if device == "cuda" else 0
     new = initialize_transfer(path, target, 92)

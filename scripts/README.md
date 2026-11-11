@@ -4,6 +4,7 @@
 
 |目录|入口|用途|
 |---|---|---|
+|evaluation/|compare_hpgi_refinement.py --parent Fixed的last.pt --parent-revision 完整提交 --seeds 开发种子列表 --output results/comparisons/名称|相同成熟Fixed权重及相同请求下比较固定切分、仅切分优化、联合指派/接纳交换；4个CPU进程，无训练/详细轨迹。运行前保存配置/来源/种子，逐轨迹CSV含成本、服务、能耗及实测推理时间；校验输入配对和父权重未变。属于开发机制比较，不代替从头多种子|
 |training/|develop_hpgi.py --parent 父last.pt --parent-revision 完整提交 --run-id 开发ID --seed 新训练种子 --eval-seeds 独立开发种子列表|最多5轮的显式HPGI迁移开发：先核对受限策略复现Fixed-Split，比较优化前后完整闭环，再经公开train入口重新采样/PPO更新，最后在相同开发请求上评价；4worker/CUDA128沿用父配置、每10轮检查点、关闭详细轨迹。父来源和新增预算分别记录；标量结果在results/comparisons，开发试验不能当正式独立种子。--passes=0可作无切分优化对照|
 |evaluation/|evaluate_greedy.py --suite data/processed/evaluation/conditional-main-comparison-v1 --run-id evaluate-greedy-shared20|冻结20条128槽新请求输入，4进程执行同一贪心方法；无网络/训练。逐轨迹和池化CSV归results，物理记录及校验归logs/runs；逐轨迹样本标准差与池化指标分开，失败不填零。支持--trajectories/--first-seed/--workers/--overlay；叠加runtime/windows_performance.json时主进程和worker继承AboveNormal/HighQoS并保存读回值；既有输入校验哈希并检查训练种子交集|
 |evaluation/|python -m scripts.evaluation.select_fixed_split --suite data/processed/development/fixed-split-v1 --run-id select-fixed-split-v1|穷举逐模型合法固定点的笛卡尔积；所有组合使用相同开发输入、公共因果贪心/容量约束/P3，按完整目标成本选择。默认2条128槽开发轨迹、4个CPU进程；保存全部候选CSV/排序/哈希及selected_overlay.json，之后作为固定点overlay传给fixed_split独立训练；不声称全局最优训练策略|

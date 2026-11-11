@@ -7,6 +7,7 @@ from pathlib import Path
 
 METHODS = ("hpgi", "joint_ppo", "always_on", "fixed_split", "single_timescale", "fixed_window",
            "upper_ppo_greedy", "greedy_consolidation", "nominal", "full_information")
+OPTIONAL_SOLVER_KEYS = frozenset(("dynamic_split", "split_solver", "split_refinement_passes", "split_refinement_scope"))
 
 
 def default_project_root():
@@ -22,7 +23,7 @@ def merge_config(base, overlay, path=""):
     result = copy.deepcopy(base)
     for key, value in overlay.items():
         if key not in result:
-            if path not in ("ppo_layers.upper.", "ppo_layers.lower."):
+            if path not in ("ppo_layers.upper.", "ppo_layers.lower.") and not (path == "" and key in OPTIONAL_SOLVER_KEYS):
                 raise ValueError(f"Unknown configuration key: {path}{key}")
             result[key] = copy.deepcopy(value)
             continue
@@ -91,7 +92,8 @@ def load_config(path, overlays=(), overrides=()):
                 raise ValueError(f"Unknown override: {key}")
             branch = branch[part]
         layer_override = parts[:-1] in (["ppo_layers", "upper"], ["ppo_layers", "lower"])
-        if not isinstance(branch, dict) or (parts[-1] not in branch and not layer_override):
+        solver_override = len(parts) == 1 and parts[0] in OPTIONAL_SOLVER_KEYS
+        if not isinstance(branch, dict) or (parts[-1] not in branch and not layer_override and not solver_override):
             raise ValueError(f"Unknown override: {key}")
         branch[parts[-1]] = json.loads(value)
     validate(config)
@@ -132,7 +134,7 @@ def validate(config):
                "fading_range", "generalization_divisions", "local_rate", "local_kappa", "tx_power",
                "noise_density", "interference", "gain_reference", "reserved_bandwidth", "anonymization_seconds",
                "control_seconds", "backhaul_seconds", "lambda_time", "rejection_cost", "capacity_mask",
-               "learned_rates", "fixed_split", "long_term_feedback", "dynamic_split", "initial_active", "split_solver", "split_refinement_passes",
+               "learned_rates", "fixed_split", "long_term_feedback", "dynamic_split", "initial_active", "split_solver", "split_refinement_passes", "split_refinement_scope",
                "history_slots", "servers", "access_points", "units", "profiles", "ppo", "ppo_layers",
                "training", "seeds", "device", "validation", "checkpoint_policy", "reward_normalization", "monitoring", "stopping", "runtime", "convergence", "trace_retention", "diagnostics"}
     if set(config) - allowed:
@@ -146,6 +148,9 @@ def validate(config):
         raise ValueError("Fixed proposals require dynamic HPGI, capacity masks and P3")
     if solver == "policy" and passes:
         raise ValueError("Refinement passes require fixed_proposal")
+    scope = config.get("split_refinement_scope", "splits")
+    if scope not in ("splits", "assignment") or (scope != "splits" and solver != "fixed_proposal"):
+        raise ValueError("Invalid split refinement scope")
     monitoring = config.get("monitoring", {"tensorboard": False, "console": True})
     if set(monitoring) != {"tensorboard", "console"} or any(type(value) is not bool for value in monitoring.values()):
         raise ValueError("Invalid monitoring settings")

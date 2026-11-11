@@ -55,7 +55,7 @@ def initialize_transfer(path, config, seed, store=None, source_revision=None):
     payload, receipt = read_parent(path, source_revision)
     previous = payload["config"]
     validate(config)
-    mutable = {"method", "dynamic_split", "split_solver", "split_refinement_passes", "training", "device", "runtime", "diagnostics",
+    mutable = {"method", "dynamic_split", "split_solver", "split_refinement_passes", "split_refinement_scope", "training", "device", "runtime", "diagnostics",
                "monitoring", "stopping", "convergence", "checkpoint_policy", "validation", "trace_retention", "seeds"}
     before, after = copy.deepcopy(previous), copy.deepcopy(config)
     for key in mutable:
