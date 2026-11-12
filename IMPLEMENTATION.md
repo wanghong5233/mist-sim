@@ -36,9 +36,9 @@
 
 当前H=8，上层联合开关空间2^8=256；快层每请求最多`2+8×4=34`候选，整批联合动作是条件选择的组合。actor批量评分为`[所有条件选择的候选总数,270]→[同样行数,1]`，按请求或服务器分组后取Categorical；critic为`[transition数,135]→[transition数,1]`。行数不是单次输入特征宽度。`tests/test_state_relations.py`用同候选多重集、不同请求分组且最优动作相反的反例验证区分能力；另验证目标服务器、先前任务指派及真实采样概率/梯度。64宽仍为未调优起点，不能由维数断言容易收敛。
 
-## 方法身份、HARP与历史兼容
+## 方法身份、改进试验与历史兼容
 
-MIST是系统框架，HARP（Hierarchical Assignment Refinement with PPO）是独立方法键`harp`；原HPGI方法键`hpgi`保留。`policies/registry.py`是统一工厂，Trainer/CLI/核验及spawn worker通过它创建控制器。`base.py`复用网络构造、慢层控制及`upper/lower`权重布局；`hpgi.py:HPGIController`只执行原策略动作，`harp.py:HARPController`独立实现提案、映射、改进和执行元数据，不在原HPGI路径中挂新搜索。
+MIST是系统框架。HPGI改进试验的历史代码名HARP是本项目自起缩写，以下仅作实现简称，不是标准算法名称或已证实的贡献。方法键`harp`与原HPGI的`hpgi`分开，保留实验身份和恢复签名。`policies/registry.py`是统一工厂，Trainer/CLI/核验及spawn worker通过它创建控制器。`base.py`复用网络构造、慢层控制及`upper/lower`权重布局；`hpgi.py:HPGIController`只执行原策略动作，`harp.py:HARPController`独立实现提案、映射、改进和执行元数据，不在原HPGI路径中挂新搜索。
 
 HARP配置必须为robust信息、dynamic_split、容量掩码、P3、`fixed_proposal`及`assignment`，扫描预算为1或2；不允许通过零遍或splits范围悄悄成为另一算法。`for_method(...,"harp")`安装该组合，离开HARP时清除专用求解标志；旧默认配置不增加这些键，避免改变其配置签名。网络结构、初始化顺序、优化器、状态/奖励、校准、采样与存储接口共用，不增加学习参数。
 

@@ -2,7 +2,7 @@
 
 从mist-sim根运行；本机解释器固定`D:/Anaconda/envs/pytorch/python.exe`。scripts只编排，公共实现属于src/mist_sim。训练/评价/重放使用`python -m mist_sim`，见[工程README](../README.md)。
 
-新主算法使用`python -m mist_sim train --method harp`及`configs/algorithms/harp*.json`，选点与场景配置按README叠加；原`--method hpgi`是原版对照。下表`develop_hpgi.py/compare_hpgi_refinement.py`保留历史开发语义（hpgi+fixed_proposal），不会自动把输出重标成HARP从头实验；后续机制诊断入口的补齐由项目计划单列。
+HPGI改进试验（历史代码名HARP）使用`python -m mist_sim train --method harp`及`configs/algorithms/harp*.json`，选点与场景配置按README叠加；原`--method hpgi`是原版对照。下表`develop_hpgi.py/compare_hpgi_refinement.py`保留历史开发语义（hpgi+fixed_proposal），不会自动把输出重标成HARP从头实验。
 
 |目录|入口|用途|
 |---|---|---|
