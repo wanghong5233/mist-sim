@@ -14,6 +14,8 @@ algorithms/always_on_finite_horizon.json只训练全开服务器下的调度PPO�
 
 training/fixed_300.json要求完成300轮：训练轮数和稳定早停最小轮数均为300，因此稳定判断不会提前结束这段训练。通用稳定早停机制及窗口、耐心、尾部观察仍保留，其他预设不变。已有早停检查点不能仅加extra-cycles续训：必须显式修订停止边界并重新计算该边界下的停止诊断，保留原运行和学习状态。Fixed-Split两层均训练，只固定卸载切分；正式流程见README的select_fixed_split/train_fixed_split入口，选点结果selected_overlay.json须覆盖默认值后从头训练。默认ResNet-50/152的3、ViT-B/32的7仅为未调优入口，不是论文依据。并行资源可用--set runtime.collection_workers=2控制，不改变采样总量。
 
+algorithms/fixed_split_compute_half.json是独立的朴素固定切分对照：对每个模型的合法点，最小化abs(local_work/full_work−0.5)，平局取较小点号；仅依赖模型计算量，不搜索业务轨迹或完整成本。当前224输入剖面导出ResNet50=3、ResNet152=3、ViT-B/32=7；ResNet152合法点较粗，选中点的本地计算比例约23.34%，并非恰好对半。数值恰与旧演示默认值相同，但旧默认没有该推导凭据，不能据此重标旧运行。模型或输入尺寸改变须重新应用规则，不能直接复用此覆盖文件。仍从头训练两层PPO/P3，不减少训练预算、修改奖励或干预学习；图例明确写Fixed-Split (Compute-Half)，与已有离线选优版分别报告，不承诺其性能低于选优版或高于随机点。
+
 algorithms/single_timescale_finite_horizon.json选择Q=1，调度1024槽、开关1024区间，即每轮2048物理槽；叠加fixed_300后8192槽预训练＋300轮=622592训练槽。algorithms/upper_greedy_finite_horizon.json只训练开关PPO，调度实际调用公共容量感知贪心；Q=4、512区间即每轮2048物理槽，没有调度预训练，300轮为614400槽。两者都复用finite_horizon/sampled_return和公共CUDA/Windows运行overlay；校准各256槽另计。相同每轮交互量不等于相同总预训练或优化器预算，样本效率图须使用实际total_slots。
 
 训练/验证/测试基础种子分别1000/2000/3000；训练子轨迹用训练基础种子加10000倍计数器，实际值逐条存档。17隙短验证训练基础种子1001、测试3001，仍与验证2000分开。这些种子只用于正确性，不作性能证据。正式配置待真实剖面及参数来源确定后增加；只用JSON，不引入Hydra。
