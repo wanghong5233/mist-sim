@@ -1,6 +1,6 @@
 # MIST 仿真实验工程
 
-`mist-sim/`是独立仿真工程与Git仓库根，`src/mist_sim/`是Python导入包。MIST是系统框架；原HPGI及joint_ppo保留为比较方法。HPGI改进试验在提案后增加接纳/指派/切分搜索，历史代码名为HARP（method=harp），不代表已经确立的新主算法或创新贡献。全部方法共用环境及训练/评价基础设施。初稿提供设计假设，不作为算法正确性标准；主算法效果由实际对照决定。
+`mist-sim/`是独立仿真工程与Git仓库根，`src/mist_sim/`是Python导入包。MIST是系统框架，HPGI名称及双层PPO/P3设计来自导师V6初稿；joint_ppo为后续联合更新对照。另加动作搜索的改进试验使用历史代码名HARP（method=harp），现已搁置，仅保留可选实现与诊断来源。全部方法共用环境及训练/评价基础设施。初稿提供设计假设，不作为算法正确性标准；主算法效果由实际对照决定。
 
 ## 仓库与隐私
 
@@ -66,9 +66,9 @@ mist-sim/
 
 ## 方法与模块
 
-**HARP（Hierarchical Assignment Refinement with PPO，分层PPO与联合指派改进）**使用`--method harp`或`configs/algorithms/harp.json`。上层PPO控制启停，下层PPO在离线固定点集合上提出接纳/本地/服务器方案，联合求解器在完整动态集合上改进接纳、关联和切分，并调用P3比较成本。默认一次坐标扫描和接纳/释放交换；只接受联合可行、严格降成本且不减少总接纳数的操作。PPO使用原提案及概率，环境执行改进动作。它没有新增第三个网络，仍复用原双层网络、PPO更新与CPU采样。
+**搁置的HPGI改进试验（历史代码名HARP）**保留`--method harp`及`configs/algorithms/harp.json`入口以便复算，不作为推荐主方法。上层PPO控制启停，下层PPO在离线固定点集合上提出接纳/本地/服务器方案，联合求解器在完整动态集合上改进接纳、关联和切分，并调用P3比较成本。默认一次坐标扫描和接纳/释放交换；只接受联合可行、严格降成本且不减少总接纳数的操作。PPO使用原提案及概率，环境执行改进动作。它没有新增第三个网络，仍复用原双层网络、PPO更新与CPU采样。
 
-代码通过`policies/registry.py:make_controller`分派：`harp.py:HARPController`负责新算法，`hpgi.py:HPGIController`负责原HPGI，`base.py`仅共用网络、慢层控制和权重接口。Trainer、CLI、worker、评价与检查点均使用同一注册入口。方法名进入配置、manifest和自动运行ID；新运行分别写入`logs/runs/<运行ID>`及`results/<同一运行ID>`，不另建一套环境或日志系统。
+代码通过`policies/registry.py:make_controller`分派：`harp.py:HARPController`负责改进试验，`hpgi.py:HPGIController`负责原HPGI，`base.py`仅共用网络、慢层控制和权重接口。Trainer、CLI、worker、评价与检查点均使用同一注册入口。方法名进入配置、manifest和自动运行ID；新运行分别写入`logs/runs/<运行ID>`及`results/<同一运行ID>`，不另建一套环境或日志系统。
 
 历史`hpgi_split_refined.json`与`hpgi_assignment_refined.json`保留原内容，由`legacy_refined.py`明确兼容；它们是旧混合实验，不能当作原版HPGI或改名后的HARP正式结果。新HARP使用独立预设；`harp_finite_horizon.json`另选择共享finite_horizon/sampled_return价值估计。HARP本身不加载任何成熟权重，只有显式`--transfer-from`才迁移。
 
