@@ -2,7 +2,7 @@
   "method": "fixed_split",
   "fixed_split": {
     "resnet50": 3,
-    "resnet152": 3,
-    "vit_b_32": 7
+    "resnet152": 2,
+    "vit_b_32": 4
   }
 }
