@@ -8,6 +8,8 @@
 
 这是一套可复用的科研样式，不是某一本中文期刊的官方模板。期刊确定后按其投稿指南调宽度、字号及格式，无需改变数据处理。最终论文优先使用PDF矢量图，PNG用于检查。图中不内嵌“图1”等论文编号。
 
+`curve_styles`按算法label固定颜色、线型和稀疏标记，避免增加/移除曲线后颜色换位；颜色之外仍可依靠线型与标记辨认相近曲线。`marker_every`控制标记间隔，`band_alpha`控制统计阴影透明度，`legend_columns`控制图例列数；`x_tick_step=50`可让300轮图明确显示300刻度。重叠多时可设置`show_raw=false`，原始数值仍完整保留于source_data.csv。样式随plot_config保存；旧快照没有这些选项时仍按原来的颜色/线型规则重画。
+
 强化学习的“独立种子曲线＋均值/离散带＋显式平滑”参考[OpenAI Spinning Up plot.py](https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/utils/plot.py)（MIT；只参考流程，没有复制旧Seaborn tsplot调用）。本项目按实际CSV语义处理，并明确采用后向滑动窗口，而非把未来轮次混入当前点的中心窗口。
 
 ## 单次运行

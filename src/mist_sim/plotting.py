@@ -179,6 +179,9 @@ def plot_curves(settings, root):
     from matplotlib import font_manager, ticker
     import scienceplots  # noqa: F401; registers the installed MIT-licensed styles
 
+    every = settings.get("marker_every", 20)
+    if type(every) is not int or every < 1:
+        raise ValueError("marker_every must be a positive integer")
     data, sources = load_data(settings, root)
     coordinate = "cycle_index" if settings["x"] == "iteration" else "total_slots"
     summaries = []
@@ -215,16 +218,24 @@ def plot_curves(settings, root):
             with plt.style.context(["science", "ieee", "no-latex"]), plt.rc_context(rc):
                 fig, ax = plt.subplots(figsize=(settings["width_mm"] / 25.4, settings["height_mm"] / 25.4))
                 for index, (label, (x, mean, low, high, curves)) in enumerate(series.items()):
-                    color = PALETTE[index % len(PALETTE)]
+                    style = settings.get("curve_styles", {}).get(label, {})
+                    color = style.get("color", PALETTE[index % len(PALETTE)])
+                    linestyle = style.get("linestyle", ["-", "--", "-.", ":"][index % 4])
+                    if isinstance(linestyle, list):
+                        linestyle = (linestyle[0], tuple(linestyle[1]))
                     multiplier = 100 if metric == "service" else 1
                     if settings["show_raw"]:
                         for raw_x, raw_y in curves:
                             ax.plot(raw_x, multiplier * raw_y, color=color, alpha=.22, linewidth=.6, linestyle="-", zorder=1)
                     if low is not None:
-                        ax.fill_between(x, multiplier * low, multiplier * high, color=color, alpha=.16, linewidth=0, zorder=2)
+                        ax.fill_between(x, multiplier * low, multiplier * high, color=color,
+                                        alpha=settings.get("band_alpha", .16), linewidth=0, zorder=2)
                     suffix = f" (n={len(curves)})" if len(curves) > 1 else ""
-                    ax.plot(x, multiplier * mean, label=label + suffix, color=color, linewidth=1.35,
-                            linestyle=["-", "--", "-.", ":"][index % 4], zorder=3)
+                    ax.plot(x, multiplier * mean, label=label + suffix, color=color,
+                            linewidth=style.get("line_width", settings.get("line_width", 1.35)),
+                            linestyle=linestyle, marker=style.get("marker", ""),
+                            markersize=settings.get("marker_size", 3.2), markerfacecolor="white",
+                            markeredgewidth=.8, markevery=((index * 3) % every, every), zorder=3)
                 for reference in settings["references"]:
                     if reference["metric"] == metric:
                         ax.axhline(reference["value"] * (100 if metric == "service" else 1),
@@ -235,11 +246,15 @@ def plot_curves(settings, root):
                 ax.grid(axis="y", color=".86", linewidth=.4, linestyle="--")
                 ax.margins(x=.01, y=.09)
                 if settings["x"] == "iteration":
-                    ax.xaxis.set_major_locator(ticker.MaxNLocator(nbins=5, integer=True))
+                    if settings.get("x_tick_step") is not None:
+                        ax.xaxis.set_major_locator(ticker.MultipleLocator(settings["x_tick_step"]))
+                    else:
+                        ax.xaxis.set_major_locator(ticker.MaxNLocator(nbins=5, integer=True))
                 else:
                     ax.ticklabel_format(axis="x", style="sci", scilimits=(0, 0), useMathText=True)
                 ax.yaxis.set_major_locator(ticker.MaxNLocator(nbins=5))
-                ax.legend(loc="best", handlelength=2.2)
+                ax.legend(loc=settings.get("legend_location", "best"),
+                          ncol=settings.get("legend_columns", 1), handlelength=2.6, columnspacing=1.2)
                 window = settings["smoothing_window"]
                 note = ((f"{window}轮滑动均值" if zh else f"{window}-iteration moving average") if window > 1 else
                         ("未平滑" if zh else "Unsmoothed"))
