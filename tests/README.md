@@ -1,5 +1,7 @@
 # 测试范围
 
+test_exploration.py覆盖分层温度的独立概率公式、确定性动作不变、采样/串行/缓存批量重放与梯度、配置拒绝、旧父权重显式迁移、CPU及CUDA双worker两轮更新、温度退火和严格恢复。恢复比较CPU逐位一致，CUDA允许浮点规约舍入差；不作为性能收益证据。
+
 test_harp.py检查HARP/原HPGI/历史混合的独立控制器身份、切换方法不泄漏求解标志、配置不能悄悄变成零遍或仅切分版本、原HPGI不调用新搜索；同权重/RNG下HARP与历史assignment路径的物理执行和原提案概率一致。显式迁移与从头初始化分开，物理合同变化/重标恢复须失败。公共CLI闭环test_baseline_interfaces.py也覆盖HARP的CPU与CUDA双worker：校准/预训练、两层冻结更新、CSV、独立物理复算、评价/回放/汇总及重载继续。微型检查不冒充收敛或性能实验。
 
 test_assignment_solver.py用手算AP瓶颈验证单点不可改善、成对释放/接纳才改善的反例；枚举小型全部动作核对缓存P3与公共分配器成本一致，检查下界、输入不变、联合容量和总接纳数保持。test_hpgi_split_transfer.py同时覆盖联合搜索原提案概率、CPU/CUDA更新及严格恢复；不由小型检查证明完整训练有效。

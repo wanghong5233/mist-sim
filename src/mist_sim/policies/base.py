@@ -18,6 +18,19 @@ class BaseController:
 
         self.upper = policy("upper")
         self.lower = policy("lower", config["learned_rates"])
+        self.set_exploration(0)
+
+    def set_exploration(self, completed_cycles):
+        for layer in ("upper", "lower"):
+            settings = layer_settings(self.config, layer)
+            initial = settings.get("sampling_temperature", 1.)
+            final = settings.get("final_sampling_temperature", initial)
+            duration = settings.get("temperature_anneal_cycles", 0)
+            fraction = min(1., completed_cycles / duration) if duration else 0.
+            getattr(self, layer).sampling_temperature = initial + fraction * (final - initial)
+
+    def sampling_temperatures(self):
+        return {layer: getattr(self, layer).sampling_temperature for layer in ("upper", "lower")}
 
     def slow(self, observation, deterministic=False, pretrain=False, record=True, cached=None):
         if pretrain or self.method == "always_on":

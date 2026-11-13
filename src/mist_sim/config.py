@@ -8,6 +8,7 @@ from pathlib import Path
 METHODS = ("harp", "hpgi", "joint_ppo", "always_on", "fixed_split", "single_timescale", "fixed_window",
            "upper_ppo_greedy", "greedy_consolidation", "nominal", "full_information")
 OPTIONAL_SOLVER_KEYS = frozenset(("dynamic_split", "split_solver", "split_refinement_passes", "split_refinement_scope"))
+EXPLORATION_KEYS = frozenset(("sampling_temperature", "final_sampling_temperature", "temperature_anneal_cycles"))
 
 
 def default_project_root():
@@ -23,7 +24,7 @@ def merge_config(base, overlay, path=""):
     result = copy.deepcopy(base)
     for key, value in overlay.items():
         if key not in result:
-            if path not in ("ppo_layers.upper.", "ppo_layers.lower.") and not (path == "" and key in OPTIONAL_SOLVER_KEYS):
+            if path not in ("ppo_layers.upper.", "ppo_layers.lower.") and not (path == "" and key in OPTIONAL_SOLVER_KEYS) and not (path == "ppo." and key in EXPLORATION_KEYS):
                 raise ValueError(f"Unknown configuration key: {path}{key}")
             result[key] = copy.deepcopy(value)
             continue
@@ -279,8 +280,17 @@ def validate(config):
         settings = layer_settings(config, layer)
         expected = {"hidden", "learning_rate", "adam_epsilon", "clip", "gae_lambda", "gamma",
                     "max_grad_norm", "value_coefficient", "entropy_coefficient", "epochs", "minibatch", "target_kl"}
-        if not expected <= set(settings) or set(settings) - expected - {"advantage_normalization", "value_model", "value_target"}:
+        if not expected <= set(settings) or set(settings) - expected - {"advantage_normalization", "value_model", "value_target"} - EXPLORATION_KEYS:
             raise ValueError("Unknown/missing PPO setting")
+        for key in ("sampling_temperature", "final_sampling_temperature"):
+            value = settings.get(key, 1.)
+            if type(value) not in (int, float) or not math.isfinite(value) or not .1 <= value <= 5.:
+                raise ValueError("Sampling temperature must be finite and between 0.1 and 5")
+        anneal = settings.get("temperature_anneal_cycles", 0)
+        if type(anneal) is not int or anneal < 0:
+            raise ValueError("Temperature annealing cycles must be a nonnegative integer")
+        if settings.get("final_sampling_temperature", settings.get("sampling_temperature", 1.)) != settings.get("sampling_temperature", 1.) and anneal < 1:
+            raise ValueError("Changing sampling temperature requires annealing cycles")
         if settings.get("value_model", "plain") not in ("plain", "finite_horizon"):
             raise ValueError("Invalid value model")
         if settings.get("value_target", "gae") not in ("gae", "sampled_return"):

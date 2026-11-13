@@ -19,10 +19,12 @@ def initialize_collector(config, seed, stop):
     collector.collection_stop = stop
 
 
-def collect_episode(state, normalization, versions, trace_index, layer, count, pretrain, deadline, trace=None):
+def collect_episode(state, normalization, versions, trace_index, layer, count, pretrain, deadline, trace=None, temperatures=None):
     collector.controller.load_state_dict({layer_name: {name: torch.from_numpy(value) for name, value in tensors.items()}
                                           for layer_name, tensors in state.items()})
     collector.reward_normalizer.load_state_dict(normalization)
+    for layer_name, temperature in (temperatures or {}).items():
+        getattr(collector.controller, layer_name).sampling_temperature = temperature
     collector.versions = versions
     collector.trace_counter = trace_index
     collector.total_slots = 0
@@ -63,7 +65,7 @@ class EpisodeCollectors:
         normalization = trainer.reward_normalizer.state_dict()
         futures = {self.pool.submit(timed_episode, state, normalization, dict(trainer.versions),
                                     trace_index, layer, count, pretrain, trainer.deadline,
-                                    (traces or {}).get(trace_index)): index
+                                    (traces or {}).get(trace_index), trainer.controller.sampling_temperatures()): index
                    for index, (trace_index, count) in enumerate(jobs)}
         pending, outputs = set(futures), {}
         samples_done, slots_done = 0, 0

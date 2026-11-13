@@ -53,6 +53,7 @@ class RolloutTensors:
                 self.decisions[id(step)] = dict(
                     mask=pack(step["mask"], torch.bool),
                     action=pack([step["action"]], torch.long),
+                    temperature=pack([sample.get("sampling_temperature", 1.)]),
                     latent=pack([step["rate_latent"]]) if step.get("rate_latent") is not None else None)
                 if "prefix_frame" in step:
                     frame(step["prefix_frame"])
@@ -251,7 +252,9 @@ def replay_batch(policy, samples, with_value=True, cache=None):
         mask = (torch.cat([cache.decisions[id(step)]["mask"] for step in steps]) if cache is not None else
                 tensor(policy, [bool(valid) for step in steps for valid in step["mask"]], torch.bool))
         logits = scores.new_full((len(steps), int(lengths.max())), -torch.inf)
-        logits[decision_ids, columns] = scores.masked_fill(~mask, -torch.inf)
+        temperatures = (torch.cat([cache.decisions[id(step)]["temperature"] for step in steps]) if cache is not None else
+                        tensor(policy, [samples[owner].get("sampling_temperature", 1.) for owner in owners]))
+        logits[decision_ids, columns] = (scores / temperatures[decision_ids]).masked_fill(~mask, -torch.inf)
         distribution = Categorical(logits=logits)
         actions = (torch.cat([cache.decisions[id(step)]["action"] for step in steps]) if cache is not None else
                    tensor(policy, [step["action"] for step in steps], torch.long))

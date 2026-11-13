@@ -1,0 +1,16 @@
+{
+  "method": "hpgi",
+  "ppo_layers": {
+    "upper": {
+      "sampling_temperature": 2.0,
+      "final_sampling_temperature": 1.5,
+      "temperature_anneal_cycles": 9
+    },
+    "lower": {
+      "sampling_temperature": 0.7,
+      "final_sampling_temperature": 0.5,
+      "temperature_anneal_cycles": 4,
+      "entropy_coefficient": 0.001
+    }
+  }
+}

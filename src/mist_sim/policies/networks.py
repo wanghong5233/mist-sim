@@ -138,6 +138,7 @@ class SetPolicy(nn.Module):
     def __init__(self, hidden=64, learned_rates=False, value_model="plain", horizon=1, gamma=1.):
         super().__init__()
         self.learned_rates = learned_rates
+        self.sampling_temperature = 1.
         self.value_model, self.value_horizon, self.value_gamma = value_model, horizon, gamma
         if gamma == 1:
             self.discounted_horizon = horizon
@@ -220,7 +221,7 @@ class SetPolicy(nn.Module):
         encoded = torch.cat(self.encode(frame, critic=True))
         return self.value_from_encoding(encoded, encoded.new_tensor(frame["context"]))
 
-    def distribution(self, frame_encoding, features, prefix, mask, servers=None, targets=None):
+    def distribution(self, frame_encoding, features, prefix, mask, servers=None, targets=None, temperature=None):
         encoded_items = self.actor_actions(self.action_norm(torch.tensor(features, dtype=torch.float32)))
         shared = torch.cat((*frame_encoding, self.prefix_norm(torch.tensor(prefix, dtype=torch.float32))))
         target_encoding = torch.zeros_like(encoded_items)
@@ -235,7 +236,8 @@ class SetPolicy(nn.Module):
         valid = torch.tensor([bool(value) for value in mask], dtype=torch.bool)
         if not valid.any():
             raise ValueError("No legal action")
-        logits = logits.masked_fill(~valid, -torch.inf)
+        temperature = self.sampling_temperature if temperature is None else temperature
+        logits = (logits / temperature).masked_fill(~valid, -torch.inf)
         return Categorical(logits=logits), combined
 
     def replay(self, sample):
@@ -246,7 +248,7 @@ class SetPolicy(nn.Module):
             conditional_encoding, conditional_servers = (self.encode(step["prefix_frame"], with_servers=True)
                                                         if "prefix_frame" in step else (encoding, servers))
             distribution, combined = self.distribution(conditional_encoding, step["features"], step["prefix"], step["mask"],
-                                                      conditional_servers, step.get("targets"))
+                                                      conditional_servers, step.get("targets"), sample.get("sampling_temperature", 1.))
             selected = torch.tensor(step["action"])
             logprob = logprob + distribution.log_prob(selected)
             entropy = entropy + distribution.entropy()
@@ -284,7 +286,7 @@ class SetPolicy(nn.Module):
         if not record:
             return actions, None
         sample = {"frame": frame, "steps": steps, "actions": actions,
-                  "activation_probabilities": activation_probabilities}
+                  "activation_probabilities": activation_probabilities, "sampling_temperature": self.sampling_temperature}
         value = cached[1] if cached is not None else self.value(frame)
         sample.update(logprob=float(logprob), value=float(value))
         return actions, sample
@@ -345,7 +347,8 @@ class SetPolicy(nn.Module):
         if not record:
             return actions, predicted if self.learned_rates else None, None
         sample = {"frame": frame, "steps": steps, "actions": actions,
-                  "order": [item["id"] for item in problem.public], "predicted_rates": predicted if self.learned_rates else None}
+                  "order": [item["id"] for item in problem.public], "predicted_rates": predicted if self.learned_rates else None,
+                  "sampling_temperature": self.sampling_temperature}
         value = cached[1] if cached is not None else self.value(frame)
         sample.update(logprob=float(logprob), value=float(value))
         return actions, sample["predicted_rates"], sample

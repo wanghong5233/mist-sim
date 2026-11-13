@@ -6,7 +6,7 @@ import subprocess
 
 import torch
 
-from .config import validate
+from .config import validate, EXPLORATION_KEYS
 from .storage import digest_file
 from .training import Trainer, CHECKPOINT_SCHEMA, implementation_signature, signature
 
@@ -64,9 +64,11 @@ def initialize_transfer(path, config, seed, store=None, source_revision=None):
     # Keep architecture, discount, reward units and every physical input fixed.
     for section in ("ppo", "ppo_layers"):
         def strip(settings):
+            controls = {"learning_rate", "entropy_coefficient"} | EXPLORATION_KEYS
             if section == "ppo":
-                return {k: v for k, v in settings.items() if k not in ("learning_rate", "entropy_coefficient")}
-            return {k: {a: b for a, b in v.items() if a not in ("learning_rate", "entropy_coefficient")} for k, v in settings.items()}
+                return {k: v for k, v in settings.items() if k not in controls}
+            stripped = {k: {a: b for a, b in v.items() if a not in controls} for k, v in settings.items()}
+            return {k: v for k, v in stripped.items() if v}
         before[section], after[section] = strip(before.get(section, {})), strip(after.get(section, {}))
     if before != after or config["method"] not in ("hpgi", "harp"):
         raise ValueError("Transfer changed a noncompatible physical/representation/learning contract")

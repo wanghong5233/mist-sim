@@ -411,6 +411,10 @@ class Trainer:
             for parameter in frozen.parameters():
                 parameter.requires_grad_(True)
         metrics = dict(iteration=len(self.history) + 1, stage=name, layer=layer,
+                       sampling_temperatures=self.controller.sampling_temperatures(),
+                       active_fraction_by_server=np.mean([record["active"] for record in records], axis=0).tolist(),
+                       ap_bandwidth_full_fraction=[sum(record["usage"]["bandwidth"][index] >= ap["bandwidth"] - 1e-8
+                           for record in records) / len(records) for index, ap in enumerate(self.config["access_points"])],
                        physical_slots=len(records), raw_reward_sum=sum(record["reward"] for record in records),
                        detailed_trace=detailed,
                        raw_reward_per_slot=sum(record["reward"] for record in records) / len(records),
@@ -522,6 +526,7 @@ class Trainer:
             if stopping_history and stopping_history[-1].get("convergence", {}).get("stop", False):
                 self.stop_reason = "reward_stable"
                 break
+            self.controller.set_exploration(cycle)
             phases = (("joint", True, self.config["training"]["fast_slots"]),) if self.config["method"] == "joint_ppo" else (
                 ("upper", self.controller.learn_upper, self.config["training"]["slow_intervals"]),
                 ("lower", self.controller.learn_lower, self.config["training"]["fast_slots"]))
@@ -683,6 +688,7 @@ class Trainer:
         payload = {"schema": CHECKPOINT_SCHEMA, "config": self.config, "signature": signature(self.config),
                    "implementation_signature": implementation_signature(), "resumable": not self.phase_in_progress,
                    "seed": self.seed, "controller": self.controller.state_dict(), "transfer": self.transfer_provenance,
+                   "sampling_temperatures": self.controller.sampling_temperatures(),
                    "reward_normalizer": self.reward_normalizer.state_dict(),
                    "value_reward_scales": self.value_reward_scales,
                    "optimizers": {key: optimizer.state_dict() for key, optimizer in self.optimizers.items()},
@@ -716,6 +722,8 @@ class Trainer:
             raise ValueError("Checkpoint/config/input mismatch")
         trainer = cls(expected, payload["seed"], store)
         trainer.controller.load_state_dict(payload["controller"])
+        for layer, temperature in payload.get("sampling_temperatures", {}).items():
+            getattr(trainer.controller, layer).sampling_temperature = temperature
         trainer.reward_normalizer.load_state_dict(payload["reward_normalizer"])
         trainer.value_reward_scales = payload["value_reward_scales"]
         for key, optimizer in trainer.optimizers.items():
