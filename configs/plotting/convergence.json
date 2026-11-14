@@ -21,12 +21,12 @@
   "marker_every": 25,
   "legend_columns": 2,
   "curve_styles": {
-    "HPGI": {"color": "#004488", "linestyle": "-", "marker": "o", "line_width": 1.8, "marker_offset": 0},
-    "Fixed-Split": {"color": "#C58A00", "linestyle": [0, [5, 2.5]], "marker": "s", "marker_offset": 4},
-    "Single-Timescale": {"color": "#238B45", "linestyle": [0, [7, 2, 1.2, 2]], "marker": "^", "marker_offset": 8},
-    "Always-On": {"color": "#666666", "linestyle": [0, [1, 2]], "marker": "D", "marker_offset": 12},
-    "Fixed-Window": {"color": "#7B3294", "linestyle": [0, [2.5, 1.8]], "marker": "v", "marker_offset": 16},
-    "Upper-PPO+Greedy": {"color": "#D62728", "linestyle": [0, [10, 3.5]], "marker": "X", "marker_offset": 20}
+    "HPGI": {"color": "#C43C39", "linestyle": "-", "marker": "o", "line_width": 1.8, "marker_offset": 0},
+    "Fixed-Split": {"color": "#B58A2A", "linestyle": [0, [5, 2.5]], "marker": "s", "marker_offset": 4},
+    "Single-Timescale": {"color": "#4F8A5B", "linestyle": [0, [7, 2, 1.2, 2]], "marker": "^", "marker_offset": 8},
+    "Always-On": {"color": "#7A7A7A", "linestyle": [0, [1, 2]], "marker": "D", "marker_offset": 12},
+    "Fixed-Window": {"color": "#8A6BA8", "linestyle": [0, [2.5, 1.8]], "marker": "v", "marker_offset": 16},
+    "Upper-PPO+Greedy": {"color": "#4C78A8", "linestyle": [0, [10, 3.5]], "marker": "X", "marker_offset": 20}
   },
   "references": [],
   "output": null
