@@ -158,6 +158,8 @@ conditional终端按Iteration及两个步骤显示服务器PPO、调度PPO；进
 
 plotting.py只读取完成的cycles.csv；scripts/plotting/plot_convergence.py是统一入口，configs/plotting/convergence.json管理样式/统计。直接复用SciencePlots 2.2.2的science/ieee/no-latex，中文宋体、西文Times，PNG及嵌入字体PDF/轮廓SVG。iteration用于同方法训练趋势，total_slots包含预训练开销、用于不同机制交互效率比较；不补造iteration=0或预训练期间不存在的cycle点。
 
+六方法的颜色/虚线/标记按label固定，marker_offset使相近曲线的标记错开；可选inset复制主图相同Line2D及数据变换，仅按显式横纵轴范围局部显示，不重采样或改变平滑。尺寸、配色表、局部框参数及布局约定统一见docs/PLOTTING.md，实际图的全部设置由plot_config冻结。
+
 原始指标保留不变；展示时每种子先做同窗口后向均值，初始窗口只用已发生的点，再按精确共同横坐标求种子均值。单种子无统计带；多种子默认±1样本标准差，可切换整条种子bootstrap的逐点95%区间。不把时间窗口当独立种子，不外推短曲线或复制终值。图片、source_data.csv快照、aggregate.csv、plot_config和provenance写入同一结果目录的figures/convergence；快照及原CSV/代码/样式哈希使运行中绘图也可精确重现。重画已保存配置时检查快照哈希，不重新读取不断追加的原CSV。采样均值不称作固定验证/测试成绩，详见docs/PLOTTING.md。
 
 ## 实现来源

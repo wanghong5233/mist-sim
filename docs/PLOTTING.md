@@ -10,6 +10,19 @@
 
 `curve_styles`按算法label固定颜色、线型和稀疏标记，避免增加/移除曲线后颜色换位；颜色之外仍可依靠线型与标记辨认相近曲线。`marker_every`控制标记间隔，`band_alpha`控制统计阴影透明度，`legend_columns`控制图例列数；`x_tick_step=50`可让300轮图明确显示300刻度。重叠多时可设置`show_raw=false`，原始数值仍完整保留于source_data.csv。样式随plot_config保存；旧快照没有这些选项时仍按原来的颜色/线型规则重画。
 
+六方法统一视觉映射如下，以configs中的实际值为准；后续服务率、成本及扩展实验图沿用，不按每图的曲线顺序重新分色。靠近的Fixed-Split与Upper-PPO+Greedy分别用橙红和青蓝，避免原橙/棕的近色组合；HPGI用更深的藏蓝，和青蓝保持明度差。线型和标记同时区分，兼顾灰度打印与颜色识别差异。
+
+|算法|颜色|线型|空心标记|
+|---|---|---|---|
+|HPGI|藏蓝 #004488|实线，1.8 pt|圆形|
+|Fixed-Split|橙红 #D55E00|中虚线|方形|
+|Single-Timescale|绿 #009E73|点划线|上三角|
+|Always-On|深灰 #666666|点线|菱形|
+|Fixed-Window|紫 #7B3294|短虚线|下三角|
+|Upper-PPO+Greedy|青蓝 #0099BB|长虚线|叉形|
+
+当前六线主图为150×96 mm、10 pt、对照线1.35 pt、标记3.7 pt；每25轮一个标记，各算法的`marker_offset`固定且错开，避免交叉处标记堆叠。图例放下方空白区，`legend_anchor`可微调位置。可选`inset`通过metric/bounds/xlim/ylim/xticks/yticks/title_zh/title_en指定局部放大：当前180–300轮、奖励−174至−152，展示相近的四条后期曲线；其余曲线在该纵轴范围外。放大框复制主图的相同均线、虚线和标记，不插值、不改变平滑窗口。没有共同空白区时另选位置，不遮盖实际曲线。当前单种子不画阴影，保留全部真实数据；后续确有多种子时仍沿用相同颜色，阴影alpha宜低（默认0.10），不以堆叠阴影代替线型区分。
+
 强化学习的“独立种子曲线＋均值/离散带＋显式平滑”参考[OpenAI Spinning Up plot.py](https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/utils/plot.py)（MIT；只参考流程，没有复制旧Seaborn tsplot调用）。本项目按实际CSV语义处理，并明确采用后向滑动窗口，而非把未来轮次混入当前点的中心窗口。
 
 ## 单次运行

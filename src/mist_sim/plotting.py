@@ -217,6 +217,7 @@ def plot_curves(settings, root):
                   "ytick.labelsize": settings["font_size"] - .5, "legend.fontsize": settings["font_size"] - 1}
             with plt.style.context(["science", "ieee", "no-latex"]), plt.rc_context(rc):
                 fig, ax = plt.subplots(figsize=(settings["width_mm"] / 25.4, settings["height_mm"] / 25.4))
+                rendered_lines = []
                 for index, (label, (x, mean, low, high, curves)) in enumerate(series.items()):
                     style = settings.get("curve_styles", {}).get(label, {})
                     color = style.get("color", PALETTE[index % len(PALETTE)])
@@ -231,11 +232,12 @@ def plot_curves(settings, root):
                         ax.fill_between(x, multiplier * low, multiplier * high, color=color,
                                         alpha=settings.get("band_alpha", .16), linewidth=0, zorder=2)
                     suffix = f" (n={len(curves)})" if len(curves) > 1 else ""
-                    ax.plot(x, multiplier * mean, label=label + suffix, color=color,
+                    line, = ax.plot(x, multiplier * mean, label=label + suffix, color=color,
                             linewidth=style.get("line_width", settings.get("line_width", 1.35)),
                             linestyle=linestyle, marker=style.get("marker", ""),
                             markersize=settings.get("marker_size", 3.2), markerfacecolor="white",
-                            markeredgewidth=.8, markevery=((index * 3) % every, every), zorder=3)
+                            markeredgewidth=.8, markevery=(style.get("marker_offset", index * 3) % every, every), zorder=3)
+                    rendered_lines.append(line)
                 for reference in settings["references"]:
                     if reference["metric"] == metric:
                         ax.axhline(reference["value"] * (100 if metric == "service" else 1),
@@ -254,7 +256,29 @@ def plot_curves(settings, root):
                     ax.ticklabel_format(axis="x", style="sci", scilimits=(0, 0), useMathText=True)
                 ax.yaxis.set_major_locator(ticker.MaxNLocator(nbins=5))
                 ax.legend(loc=settings.get("legend_location", "best"),
-                          ncol=settings.get("legend_columns", 1), handlelength=2.6, columnspacing=1.2)
+                          bbox_to_anchor=settings.get("legend_anchor"),
+                          ncol=settings.get("legend_columns", 1), handlelength=3.4, columnspacing=1.2)
+                # Copy the displayed lines so the inset retains the exact same
+                # custom dash patterns and marker offsets, with no resampling.
+                inset = settings.get("inset", {})
+                if inset.get("metric") == metric:
+                    from copy import copy
+                    zoom = ax.inset_axes(inset["bounds"])
+                    for line in rendered_lines:
+                        detail = copy(line)
+                        detail.axes = None
+                        detail.set_transform(zoom.transData)
+                        detail.set_clip_path(zoom.patch)
+                        zoom.add_line(detail)
+                    zoom.set_xlim(inset["xlim"])
+                    zoom.set_ylim(inset["ylim"])
+                    zoom.set_xticks(inset["xticks"])
+                    zoom.set_yticks(inset["yticks"])
+                    zoom.tick_params(labelsize=settings["font_size"] - 2, direction="in", which="both")
+                    zoom.minorticks_off()
+                    zoom.grid(axis="y", color=".88", linewidth=.35, linestyle="--")
+                    zoom.set_title(inset.get("title_zh" if zh else "title_en", ""),
+                                   fontsize=settings["font_size"] - 1.5, pad=4)
                 window = settings["smoothing_window"]
                 note = ((f"{window}轮滑动均值" if zh else f"{window}-iteration moving average") if window > 1 else
                         ("未平滑" if zh else "Unsmoothed"))
