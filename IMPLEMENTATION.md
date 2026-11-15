@@ -134,6 +134,8 @@ collection.py通过spawn常驻runtime.collection_workers个进程采集独立epi
 
 效率检查边界：候选生成只在单个请求调用内复用与服务器无关的切分剖面，不做跨配置持久缓存；执行只检查选中候选，按服务器一次分组，空组跳过P3；贪心复用已知当前成本，仍比较完整P3增量成本。文件哈希以1MiB分块读取，避免把整份轨迹装入内存。`tests/test_static_efficiency.py`以调用次数、动作一致性和哈希检查这些性质，不以墙钟阈值作为测试。
 
+冻结批量评价入口为`python -m scripts.evaluation.evaluate_frozen`。从已确认图源定位最后完成检查点，按训练manifest的Git版本提取临时源码，并验证完整源码签名及各版本环境/匿名发布/P3/剖面/统计的一致性；原`Trainer.load`检查不放宽。每个方法使用自己的网络和最终温度，评价前后核对网络/归一化、奖励统计、优化器步数及训练槽数不变。负载测试仅覆盖独立评价配置的arrival_probability，固定点和其余训练设定保持不变。方法间共享同一原始输入；请求及动作种子分开登记，每轨迹重置，主结果确定性，随机解码单列。原始输入只存一份，轻量结果含逐轨迹标量、分模型/切分计数和完成延迟；池化P95由全部完成延迟重算，配对bootstrap按完整轨迹重采样，不能作为训练种子方差。
+
 评价和冻结层使用`record=False`动作路径，跳过critic及训练记录；采样在同一rollout内复用已算出的后继frame/value，重置时清空缓存。PPO的`RolloutTensors`只缓存原始输入、掩码及已选动作张量，跨epoch复用；网络激活仍逐次重算，缓存随本次更新释放。环境时序、容量前缀、GAE递推和P3二分保留必要顺序。
 
 behavior采用`mist.behavior.shared.v1`共享frame/特征组格式，避免重复展开相邻观测与上层前缀；统一通过`traces.read_behavior`还原，兼容旧JSON列表。JSON采用缓冲流式写入临时文件后原子替换。检查点history仅存每阶段标量及短摘要，恢复仍保存优化器、归一化器、随机状态与评价历史。conditional按完整迭代低频覆盖一个last.pt；诊断按trace_retention有界保留，输入种子与所有原始结果CSV不删。细节与恢复边界见README。
