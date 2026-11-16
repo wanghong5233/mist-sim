@@ -270,7 +270,7 @@ def mechanism_figures(plt, settings, central, output):
                       for method, value in zip(METHODS, values))
     figure.legend(*energy_axis.get_legend_handles_labels(), loc="upper center", bbox_to_anchor=(.55, .97),
                   ncol=5, frameon=False, columnspacing=1)
-    caption = "同一中负载测试集；完成率见表T2，不把较少服务造成的低能耗解释为等服务节能。"
+    caption = "同一中负载测试集；各方法服务水平见表T2，能耗包含端侧、传输及服务器运行与唤醒开销。"
     figure.text(.52, .05, caption, ha="center", fontsize=8.2)
     save_figure(figure, output, "F6_energy_mechanism", points, settings, caption)
     plt.close(figure)
@@ -319,7 +319,7 @@ def mechanism_figures(plt, settings, central, output):
             axis.set_ylabel("边缘任务中占比 / %")
     figure.legend(*service_axis.get_legend_handles_labels(), loc="upper center", bbox_to_anchor=(.52, .98),
                   ncol=4, frameon=False, columnspacing=1.2)
-    caption = "三模型均参与原训练；下排仅统计边缘执行任务。该图不是未见模型泛化实验。"
+    caption = "三模型均参与混合训练；下排为各模型边缘执行任务的切分比例。"
     figure.text(.52, .055, caption, ha="center", fontsize=8.2)
     save_figure(figure, output, "F7_model_split", points, settings, caption)
     plt.close(figure)
@@ -358,6 +358,9 @@ def base_tables(specification, central, output):
         "J/槽", "全部到达按时率%", "已发布按时率%", "成功任务P95/ms", "全部到达超期率%", "资源失败率%"], rows,
         "每方法20条相同的128槽请求；单训练种子，确定性推断。P95仅对按时完成任务定义，须与失败率同时读取。信息参照不按跨口径成本排名。")
     fixed_splits = specification["methods"]["fixed_split"]["config"]["fixed_split"]
+    hpgi_config = specification["methods"]["hpgi"]["config"]
+    ppo = hpgi_config["ppo"]
+    exploration = hpgi_config["ppo_layers"]
     parameters = [
         ("模型", "ResNet50 / ResNet152 / ViT-B32；224×224 FP32 batch1", "真实结构剖面；不等于系统硬件测量"),
         ("规模", "40终端、8服务器、2 AP", "条件仿真假设"),
@@ -373,6 +376,10 @@ def base_tables(specification, central, output):
         ("固定切分", json.dumps(fixed_splits, ensure_ascii=False), "静态计算＋传输时延解析规则；非测试集选点"),
         ("目标与预留", "lambda_time=1；拒绝20J；匿名1ms＋控制10ms＋回程1ms", "目标权重与模型预留；实测控制时间单列T3"),
         ("原始训练", "各300轮；训练seed4200001", "8种学习方法；Greedy无需训练"),
+        ("HPGI PPO", f"隐藏宽度{ppo['hidden']}；学习率{ppo['learning_rate']:g}；裁剪{ppo['clip']}；gamma={ppo['gamma']}；GAE={ppo['gae_lambda']}", "读取最终权重对应配置；基线具体配置见冻结清单"),
+        ("HPGI更新", f"最多{ppo['epochs']} epoch；minibatch={ppo['minibatch']}；梯度范数阈值{ppo['max_grad_norm']}；KL阈值{ppo['target_kl']}", "有限时域价值模型、采样回报目标；达到KL阈值可提前结束更新"),
+        ("HPGI探索", f"上层温度{exploration['upper']['sampling_temperature']}→{exploration['upper']['final_sampling_temperature']}；下层{exploration['lower']['sampling_temperature']}→{exploration['lower']['final_sampling_temperature']}；{exploration['lower']['temperature_anneal_cycles']}轮退火", f"上层熵系数{ppo['entropy_coefficient']}，下层{exploration['lower']['entropy_coefficient']}；信息对照匹配，结构基线探索设置不同"),
+        ("训练执行", f"CUDA minibatch={ppo['minibatch']}；{hpgi_config['runtime']['collection_workers']}个CPU采样进程；torch线程{hpgi_config['runtime']['torch_threads']}", "HPGI下层预训练8192槽；每完整轮两批各1024槽；实际累计预算单列"),
         ("冻结评价", "每条件每方法20×128槽；20条独立请求；确定性决策", "不更新网络、归一化或优化器；不是逐参数重新训练"),
         ("不确定性", "5000次轨迹bootstrap，seed0，95%区间", "表示请求波动；不表示训练随机种子方差"),
     ]
@@ -384,7 +391,7 @@ def base_tables(specification, central, output):
         config_sha256=method["config_sha256"], revision=method["revision"]) for name, method in specification["methods"].items()])
 
 
-def timing_table(rows, output):
+def timing_table(rows, output, platform):
     table = []
     for row in sorted(rows, key=lambda item: (item["method"], item["axis_value"])):
         timing = row["timing"]
@@ -399,11 +406,12 @@ def timing_table(rows, output):
             total_max_ms=float(values.max()), model_reserved_ms=timing["reserved_control_seconds"] * 1000,
             exceeds_reserved_fraction=float(np.mean(values > timing["reserved_control_seconds"] * 1000))))
     write_csv(output / "tables/T3_serial_timing.csv", table)
+    write_json(output / "tables/T3_platform.json", platform)
     methods = {**METHODS, **INFORMATION}
     markdown_table(output / "tables/T3_serial_timing.md", "T3 串行CPU决策计时", ["方法", "请求/槽", "P50/ms", "P95/ms", "超过10ms比例%"],
         [[methods[row["method"]], row["expected_arrivals"], f"{row['total_p50_ms']:.2f}",
           f"{row['total_p95_ms']:.2f}", f"{100 * row['exceeds_reserved_fraction']:.1f}"] for row in table],
-        "各方法各负载先预热128槽，再串行测128槽，CPU单torch线程、AboveNormal/HighQoS。包括公开观测/候选构造、策略及投影/P3；不含物理执行模拟、磁盘及模型加载。总P50是逐槽总时间的分位数，不能由分项P50相加。此表检验10ms模型控制预留，不将超时偷偷改入原效能结果。")
+        f"平台：{platform['processor']}，{platform['os']}，PyTorch {platform['torch']}。各方法各负载先预热128槽，再串行测128槽，CPU单torch线程、AboveNormal/HighQoS；桌面未完全隔离。包括公开观测/候选构造、策略及投影/P3；不含物理执行模拟、磁盘及模型加载。总P50是逐槽总时间的分位数，不能由分项P50相加。效能测试使用固定10ms模型控制预留，本表的实测时间未注入该效能测试。")
 
 
 def exact_table(specification, output):
@@ -626,7 +634,9 @@ def main():
         write_csv(output / "anonymity_checks.csv", gateway_table)
         timing, source = load_batch(spec_path, "T")
         sources.update(source)
-        timing_table(timing, output)
+        platform_path = spec_path.parent / "timing_platform.json"
+        timing_table(timing, output, read_json(platform_path))
+        sources[str(platform_path)] = digest(platform_path)
         gallery(output)
     provenance(spec_path, output, sources)
     print(str(output), flush=True)
