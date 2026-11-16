@@ -36,6 +36,8 @@ test_parallel_collection.py检查同种子串行episode参考与并行buffer/动
 
 运行：python -m pytest tests -q。test_physics.py覆盖物理、匿名、资源与有界搜索；test_learning.py覆盖联合概率、掩码、GAE、冻结、归一化、尾区间和完整恢复。
 
+test_frozen_evaluation.py核对严格源码/权重恢复、冻结推断、请求配对、白名单k/AP容量覆盖及计时预热不改变服务结果；test_frozen_load_plot.py和test_paper_results.py核对池化分母、轨迹bootstrap、配对成本符号、重复/错配输入拒用与带宽利用率。定向运行这三类测试不启动正式训练，产物在临时目录。
+
 test_state_relations.py检查请求分组反例、目标服务器/既有指派、细量纲归一化、真实采样与批量概率/梯度一致及观测存储恢复；test_feasible_scenario.py检查最坏公开区间、可执行调度与重放、小网格全部切分对照及无收益案例。这两组不更新参数；真实剖面未恢复时数据测试显式skip。完整pytest还包含短PPO更新，暂停训练时只选择无需更新的检查。
 
 test_convergence.py覆盖奖励窗口稳定/趋势/波动、两种评价一致判定、尾部重置和恢复；短PPO集成核对实际保存次数、只保留last.pt、详细诊断清理及完整CSV，测试使用固定评价替身只验证停止控制，不作为性能结果。轨迹清理测试覆盖upper/lower/joint命名、重复清理和路径穿越拒绝；test_joint_ppo.py以8批预训练＋23轮联合微型训练跨越每10阶段详记/保留2组时的首次joint淘汰，检查全部CSV保留及重载第24轮。空请求诊断统计无分母时返回null。
