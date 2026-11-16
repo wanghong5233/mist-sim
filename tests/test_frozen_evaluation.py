@@ -76,6 +76,36 @@ def test_load_override_preserves_every_other_setting(config):
         frozen.evaluation_config(config, 2.)
 
 
+def test_anonymity_and_capacity_overrides_do_not_change_radio_or_algorithm(config, tmp_path):
+    from mist_sim.environment import radio_rate
+    method, task = fixture_inputs(config, tmp_path)
+    original = copy.deepcopy(method["config"])
+    overridden = frozen.evaluation_config(original, original["arrival_probability"],
+        {"k": 2, "ap_bandwidth": 2 * original["reserved_bandwidth"]})
+    assert {name for name in original if original[name] != overridden[name]} <= {"k", "access_points"}
+    assert original == method["config"]
+    server = original["servers"][0]
+    assert radio_rate(original, server, 50, 1) == radio_rate(overridden, server, 50, 1)
+    with pytest.raises(ValueError, match="Only declared"):
+        frozen.evaluation_config(original, .5, {"method": "nominal"})
+    frozen.initialize_worker(method, time.time() + 90)
+    result = frozen.evaluate_task({**task, "overrides": {"k": 2}})
+    assert result["anonymity"]["covered"] == result["anonymity"]["published"]
+    assert result["frozen_state_verified"]
+
+
+def test_timing_is_separate_from_service_latency(config, tmp_path):
+    method, task = fixture_inputs(config, tmp_path)
+    frozen.initialize_worker(method, time.time() + 90)
+    ordinary = frozen.evaluate_task({**task, "deterministic": True})
+    measured = frozen.evaluate_task({**task, "deterministic": True, "timing": True})
+    assert ordinary["metrics"] == measured["metrics"]
+    timing = measured["timing"]
+    assert timing["warmup_slots"] == timing["measured_slots"] == 4
+    assert timing["total_control_seconds"] == [policy + allocation for policy, allocation in
+        zip(timing["policy_seconds"], timing["allocation_seconds"])]
+
+
 def test_pooling_weights_requests_and_uses_raw_delay_quantiles(config, tmp_path):
     method, task = fixture_inputs(config, tmp_path)
     frozen.initialize_worker(method, time.time() + 90)

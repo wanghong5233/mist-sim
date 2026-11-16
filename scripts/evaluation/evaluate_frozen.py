@@ -78,7 +78,7 @@ def check_unused_seeds(candidates):
     collisions = []
     checked = 0
     roots = [ROOT / "logs/runs", ROOT / "results", ROOT / "data/processed/evaluation"]
-    expression = re.compile(r"(?<!\d)(54\d{5})(?!\d)")
+    expression = re.compile(r"(?<![\d.])(\d+)(?![\d.])")
     for directory in roots:
         for path in directory.rglob("*"):
             if not path.is_file() or not (path.suffix == ".csv" or path.name in
@@ -231,12 +231,87 @@ def prepare(directory):
                       "task_counts": dict(Counter(task["batch"] for task in tasks))}), flush=True)
 
 
-def evaluation_config(config, probability):
+def prepare_extension(base_path, directory):
+    from mist_sim.anonymity import generate_trace
+    base = read_json(base_path)
+    if directory.exists():
+        raise FileExistsError("Supplement specification already exists")
+    for batch in ("A", "B"):
+        status = read_json(ROOT / "logs/runs" / f"{base_path.parent.name}-{batch}" / "status.json")
+        if status["status"] != "completed" or status["spec_sha256"] != digest(base_path):
+            raise ValueError("Original evaluation must be complete and unchanged")
+    for method in base["methods"].values():
+        if method["checkpoint"] and digest(method["checkpoint"]) != method["checkpoint_sha256"]:
+            raise ValueError("Original checkpoint changed")
+    seeds = {"load15": list(range(5400501, 5400521)), "load25": list(range(5400601, 5400621))}
+    seed_audit = check_unused_seeds(set([5400701]).union(*seeds.values()))
+    config = base["methods"]["hpgi"]["config"]
+    inputs = {}
+    for label, probability in (("load15", .375), ("load25", .625)):
+        inputs[label] = []
+        for seed in seeds[label] + [5400701]:
+            path = ROOT / "data/processed/evaluation" / directory.name / label / f"seed{seed}.json"
+            write_json(path, {"seed": seed, "trace": generate_trace({**config, "arrival_probability": probability}, seed)})
+            inputs[label].append({"seed": seed, "path": str(path), "sha256": digest(path)})
+    central = [task["input"] for task in base["tasks"] if task["batch"] == "A" and
+               task["method"] == "hpgi" and task["deterministic"]]
+    development = next(task["input"] for task in base["tasks"] if task["batch"] == "preflight" and
+                       task["load"] == "middle" and task["method"] == "hpgi")
+    main_methods = [name for name in base["methods"] if name not in ("nominal", "full_information")]
+    scenarios = [("load15", "load", 15, .375, {}, "E1", main_methods, inputs["load15"]),
+                 ("load25", "load", 25, .625, {}, "E1", main_methods, inputs["load25"])]
+    for level in (2, 3, 6, 8):
+        scenarios.append((f"k{level}", "anonymity", level, .5, {"k": level}, "E2",
+                          ["hpgi", "nominal", "full_information"], central + [development]))
+    for bandwidth in (20, 30, 50, 60):
+        probes = [development] if bandwidth in (20, 60) else []
+        scenarios.append((f"bandwidth{bandwidth}", "bandwidth", bandwidth, .5,
+                          {"ap_bandwidth": bandwidth * 1000000}, "E1" if bandwidth < 40 else "E2",
+                          main_methods, central + probes))
+    tasks = []
+    for label, axis, value, probability, overrides, batch, methods, entries in scenarios:
+        for method in methods:
+            for entry in entries:
+                probe = entry["seed"] in (development["seed"], 5400701)
+                tasks.append({"id": f"{label}-{method}-det-{entry['seed']}", "batch": "preflight" if probe else batch,
+                    "method": method, "load": label, "axis": axis, "axis_value": value,
+                    "probability": probability, "overrides": overrides, "input": entry,
+                    "action_seed": entry["seed"] + 10000000, "deterministic": True, "audit": False})
+    for method in base["methods"]:
+        for load in LOADS:
+            entry = next(task["input"] for task in base["tasks"] if task["batch"] == "preflight" and
+                         task["method"] == "hpgi" and task["load"] == load)
+            tasks.append({"id": f"timing-{load}-{method}-{entry['seed']}", "batch": "T", "method": method,
+                "load": load, "axis": "timing", "axis_value": config["terminals"] * LOADS[load],
+                "probability": LOADS[load], "input": entry, "action_seed": entry["seed"] + 10000000,
+                "deterministic": True, "audit": False, "timing": True})
+    specification = {**base, "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "purpose": "complete_paper_load_anonymity_bandwidth_and_serial_timing", "tasks": tasks,
+        "base_spec": str(base_path), "base_spec_sha256": digest(base_path), "seed_audit": seed_audit,
+        "budget_seconds": {"preflight": 600, "E1": 7200, "E2": 7200, "T": 1800},
+        "workers_by_batch": {"T": 1}, "publication_grid": {"load": [10, 15, 20, 25, 30],
+        "anonymity": [2, 3, 4, 6, 8], "bandwidth_mhz_per_ap": [20, 30, 40, 50, 60]},
+        "reuse": "A/B original observations supply all unchanged central conditions; no reevaluation or PPO updates."}
+    write_json(directory / "spec.json", specification)
+    print(json.dumps({"spec": str(directory / "spec.json"), "counts": dict(Counter(task["batch"] for task in tasks))}), flush=True)
+
+
+def evaluation_config(config, probability, overrides=None):
     from mist_sim.config import validate
     if not 0 < probability <= 1:
         raise ValueError("Arrival probability outside (0, 1]")
     result = copy.deepcopy(config)
     result["arrival_probability"] = probability
+    overrides = overrides or {}
+    if set(overrides) - {"k", "ap_bandwidth"}:
+        raise ValueError("Only declared anonymity or shared AP capacity overrides are allowed")
+    if "k" in overrides:
+        result["k"] = overrides["k"]
+    if "ap_bandwidth" in overrides:
+        if overrides["ap_bandwidth"] < config["reserved_bandwidth"]:
+            raise ValueError("AP capacity below one reserved request")
+        for access in result["access_points"]:
+            access["bandwidth"] = overrides["ap_bandwidth"]
     validate(result)
     return result
 
@@ -275,7 +350,7 @@ def initialize_worker(method, deadline):
         controller = GreedyController()
     WORKER.update(method=method, trainer=trainer, controller=controller, deadline=deadline,
                   before=frozen_state(trainer) if trainer else None,
-                  runtime=configure_process(method["config"]["runtime"]["windows_performance"]))
+                  runtime={**configure_process(sys.platform == "win32"), "evaluation_script_sha256": digest(__file__)})
 
 
 def mechanism_metrics(records, config):
@@ -309,6 +384,32 @@ def mechanism_metrics(records, config):
                 sum(access["bandwidth"] for access in config["access_points"]) - 1e-8 for value in edge_counts)}
 
 
+def anonymity_metrics(records, config):
+    from mist_sim.anonymity import publish
+    published = covered = 0
+    position_width = deadline_width = 0.
+    groups = Counter()
+    for record in records:
+        gateway = publish(record["raw"], config, "robust")
+        if {item["id"] for item in gateway} != {item["id"] for item in record["public"]}:
+            raise AssertionError("Information controls have different released sets")
+        actual = {item["id"]: item for item in record["raw"]}
+        for item in gateway:
+            if item["group_size"] < config["k"]:
+                raise AssertionError("Gateway group violates requested k")
+            covered += int(all(item[field][0] <= actual[item["id"]][field] <= item[field][1]
+                               for field in ("position", "deadline", "size", "fading")))
+            published += 1
+            groups[str(item["group_size"])] += 1
+            position_width += (item["position"][1] - item["position"][0]) / (config["position_range"][1] - config["position_range"][0])
+            deadline_width += (item["deadline"][1] - item["deadline"][0]) / (config["deadline_range"][1] - config["deadline_range"][0])
+    if covered != published:
+        raise AssertionError("Published intervals do not cover actual metadata")
+    return {"published": published, "covered": covered, "group_sizes_request_weighted": dict(groups),
+            "normalized_position_width_sum": position_width, "normalized_deadline_width_sum": deadline_width,
+            "size_width": None, "size_note": "Fixed input size, excluded from information loss denominator"}
+
+
 def evaluate_task(task):
     import numpy as np
     import torch
@@ -322,12 +423,18 @@ def evaluate_task(task):
     path = task["input"]["path"]
     if digest(path) != task["input"]["sha256"]:
         raise ValueError("Shared input checksum changed")
-    config = evaluation_config(method["config"], task["probability"])
+    config = evaluation_config(method["config"], task["probability"], task.get("overrides"))
     if trainer:
         controller.config = config
     random.seed(task["action_seed"])
     np.random.seed(task["action_seed"])
     torch.manual_seed(task["action_seed"])
+    if task.get("timing"):
+        with torch.no_grad():
+            evaluate(controller, config, read_json(path)["trace"], check_budget=check_budget, deterministic=True)
+        random.seed(task["action_seed"])
+        np.random.seed(task["action_seed"])
+        torch.manual_seed(task["action_seed"])
     started = time.perf_counter()
     with torch.no_grad():
         records, metrics = evaluate(controller, config, read_json(path)["trace"],
@@ -351,6 +458,14 @@ def evaluate_task(task):
         "physics": physics, "frozen_state_verified": True, "runtime": WORKER["runtime"],
         "wall_seconds": time.perf_counter() - started, "input_sha256": task["input"]["sha256"],
         "checkpoint_sha256": method["checkpoint_sha256"], "audit_sha256": audit_hash}
+    result.update(axis=task.get("axis", "load"), axis_value=task.get("axis_value", config["terminals"] * task["probability"]),
+                  config_overrides=task.get("overrides", {}), anonymity=anonymity_metrics(records, config))
+    if task.get("timing"):
+        result["timing"] = {"warmup_slots": config["horizon"], "measured_slots": len(records),
+            "policy_seconds": [record["measured_policy_seconds"] for record in records],
+            "allocation_seconds": [record["measured_allocation_seconds"] for record in records],
+            "total_control_seconds": [record["measured_policy_seconds"] + record["measured_allocation_seconds"] for record in records],
+            "reserved_control_seconds": config["control_seconds"], "torch_threads": torch.get_num_threads()}
     return result
 
 
@@ -517,6 +632,10 @@ def run_batch(spec_path, batch, output=None, log=None):
         preflight = read_json(spec_path.parent / "preflight.json")
         if preflight["status"] != "completed" or preflight["spec_sha256"] != digest(spec_path):
             raise ValueError("This exact evaluation specification has not passed preflight")
+    if batch == "T":
+        for prior in ("E1", "E2"):
+            if read_json(ROOT / "logs/runs" / f"{spec_path.parent.name}-{prior}" / "status.json")["status"] != "completed":
+                raise ValueError("Serial timing must follow completion of both parallel batches")
     run_id = f"{spec_path.parent.name}-{batch}"
     output = output or ROOT / "results" / run_id
     log = log or ROOT / "logs/runs" / run_id
@@ -544,7 +663,7 @@ def run_batch(spec_path, batch, output=None, log=None):
                 environment = dict(os.environ, PYTHONPATH=str(Path(temporary) / "src"))
                 command = [sys.executable, "-u", "-m", "scripts.evaluation.evaluate_frozen", "cohort",
                     "--spec", str(spec_path), "--batch", batch, "--method", name,
-                    "--output", str(output), "--log", str(log), "--workers", str(specification["workers_per_terminal"]),
+                    "--output", str(output), "--log", str(log), "--workers", str(specification.get("workers_by_batch", {}).get(batch, specification["workers_per_terminal"])),
                     "--deadline", str(deadline)]
                 with subprocess.Popen(command, cwd=ROOT, env=environment, stdout=subprocess.PIPE,
                                       stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace") as process:
@@ -587,9 +706,10 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "preflight", "run", "cohort", "summarize"))
+    parser.add_argument("command", choices=("prepare", "extend", "preflight", "run", "cohort", "summarize"))
     parser.add_argument("--spec", type=Path, required=True)
-    parser.add_argument("--batch", choices=("preflight", "A", "B"))
+    parser.add_argument("--base-spec", type=Path)
+    parser.add_argument("--batch", choices=("preflight", "A", "B", "E1", "E2", "T"))
     parser.add_argument("--method")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--log", type=Path)
@@ -599,12 +719,16 @@ def main():
     spec = args.spec.resolve()
     if args.command == "prepare":
         prepare(spec.parent)
+    elif args.command == "extend":
+        if args.base_spec is None:
+            parser.error("extend requires --base-spec")
+        prepare_extension(args.base_spec.resolve(), spec.parent)
     elif args.command == "preflight":
         with tempfile.TemporaryDirectory(prefix="mist-frozen-preflight-") as temporary:
             run_batch(spec, "preflight", Path(temporary) / "results", Path(temporary) / "logs")
     elif args.command == "run":
-        if args.batch not in ("A", "B"):
-            parser.error("run requires --batch A or B")
+        if args.batch not in ("A", "B", "E1", "E2", "T"):
+            parser.error("run requires a registered batch")
         run_batch(spec, args.batch)
     elif args.command == "summarize":
         summarize_batches(spec, args.output or ROOT / "results/comparisons" / spec.parent.name)
