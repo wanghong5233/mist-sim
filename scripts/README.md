@@ -16,6 +16,7 @@ HPGI改进试验（历史代码名HARP）使用`python -m mist_sim train --metho
 |training/|python -m scripts.training.baseline_queue --spec 冻结任务JSON --queue-id 名称|最多两路正式训练的完成驱动队列：既有运行成功300轮并退出后，依次启动Fixed-Split/Fixed-Window；冻结配置、源码和选点来源，AboveNormal/HighQoS、4worker，保留已实测的后台性能设置。失败停止补位，不盲目重试；24小时监控上限不强杀训练，等待及执行期间请求保持唤醒|
 |training/|overnight_queue.py --queue-id 名称 --wait-run 运行ID --candidate 运行ID --candidate 运行ID --seed 种子2 --seed 种子3|Windows一次性依赖队列；等指定运行成功200轮并退出后，按两候选尾20轮原始成本暂选，两个可见终端各跑一个新种子/200轮。冻结原配置和源码；失败/失配不抢跑、不重试；logs/queues保存状态/选法/退出码，结果仍归results各运行。等待及训练监控期间请求系统保持唤醒，不要求屏幕亮；完成后释放。24小时仅为监控上限，不强杀训练。两任务成功后调用已有绘图入口生成三种子均值与标准差阴影；旧199轮不补点|
 |plotting/|plot_convergence.py --curve "Joint PPO=results/<运行名>"|只读cycles.csv生成中英文学习曲线，支持多算法/独立种子、iteration/物理槽、滑动均值和标准差/置信带；图与复现快照归对应results的figures/convergence，详见docs/PLOTTING.md|
+|plotting/|python -m scripts.plotting.plot_frozen_load|只读完整冻结评价与来源哈希，复用论文配色生成四联负载预览、点值与轨迹bootstrap区间；当前三个实测点为粗粒度预览，正式曲线补点须真实评价，不重采样或插值伪造负载条件|
 |validation/|benchmark_collection.py --checkpoint 路径|同冻结策略和8条输入轨迹比较2/4/6/8worker；区分冷启动、重复暖池中位数、worker墙钟/CPU/P3及回传等待，核对动作/概率/物理结果哈希；仅打印，旧快照只作诊断|
 |validation/|diagnose_learning.py --checkpoint 路径|默认检查策略/熵梯度和固定公开状态的8次局部PPO学习；--joint-updates N --lambdas .95 .8对比GAE lambda，--normalization global或phase控制优势标准化。仅在内存采样/更新，前后用相同两条诊断轨迹比较，不续训旧记录、不写正式结果|
 |validation/|inspect_learning_quality.py --run 路径 --stage cycle_022_joint|只读复算奖励分项、可避免的高成本动作、终止处价值误差、按时间位置分组的优势方差；完整gamma=1联合轨迹另与留一episode的剩余时间基线对比。仅打印及输入哈希，不更新参数，不写结果|
