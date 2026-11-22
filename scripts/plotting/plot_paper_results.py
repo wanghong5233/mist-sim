@@ -170,6 +170,7 @@ def save_figure(figure, output, name, points, settings, caption):
         figure.savefig(directory / f"{name}_zh.{extension}", dpi=settings["dpi"], facecolor="white")
     write_csv(directory / "plot_data.csv", points)
     write_json(directory / "plot_config.json", {"styles": settings["curve_styles"], "dpi": settings["dpi"],
+        "bar_fill_alpha": settings.get("bar_fill_alpha", 1.0),
         "caption": caption, "smoothing": None, "bootstrap_replicates": 5000, "bootstrap_seed": 0,
         "axes": [{"title": axis.get_title(loc="left"), "ylim": list(axis.get_ylim()),
                   "yscale": axis.get_yscale()} for axis in figure.axes],
@@ -244,7 +245,7 @@ def mechanism_figures(plt, settings, central, output):
     active_axis = figure.add_subplot(grid[0, 1])
     switch_axis = figure.add_subplot(grid[1, 1])
     bottom = np.zeros(len(METHODS))
-    components = [("static", "静态/休眠", "#9BA7B0"), ("wake", "唤醒", "#C9946E"),
+    components = [("static", "服务器基础能耗", "#9BA7B0"), ("wake", "唤醒", "#C9946E"),
                   ("local", "端侧计算", "#5E86A6"), ("transmit", "传输", "#C0AD57"),
                   ("edge", "边缘计算", "#896D9C")]
     points = []
@@ -292,10 +293,13 @@ def mechanism_figures(plt, settings, central, output):
     points = []
     positions = np.arange(3)
     width = .105
+    from matplotlib.colors import to_rgba
+    model_settings = {**settings, "bar_fill_alpha": .72}
     for method_index, (method, label) in enumerate(METHODS.items()):
         values = [100 * models[method][model]["completed"] / models[method][model]["arrivals"] for model in MODEL_NAMES]
-        service_axis.bar(positions + (method_index - 3) * width, values, width=width, label=label,
-                         color=settings["curve_styles"][label]["color"], edgecolor="white", linewidth=.4)
+        color = settings["curve_styles"][label]["color"]
+        service_axis.bar(positions + (method_index - 3) * width, values, width=width * .78, label=label,
+                         color=to_rgba(color, model_settings["bar_fill_alpha"]), edgecolor=color, linewidth=.5)
         points.extend(dict(method=method, model=model, metric="on_time_rate", split="", value=value / 100)
                       for model, value in zip(MODEL_NAMES, values))
     service_axis.set_xticks(positions, list(MODEL_NAMES.values()))
@@ -304,12 +308,6 @@ def mechanism_figures(plt, settings, central, output):
     service_axis.set_title("(a) 混合业务中的分模型服务", loc="left", pad=8)
     service_axis.grid(axis="y", color=".9", linewidth=.4, linestyle="--")
     service_axis.set_axisbelow(True)
-    for position, model in enumerate(MODEL_NAMES):
-        if all(models[method][model]["completed"] == models[method][model]["published"]
-               for method in METHODS):
-            counts = models["hpgi"][model]
-            rate = 100 * counts["published"] / counts["arrivals"]
-            service_axis.text(position, rate + 2, "达到共同发布率上限", ha="center", fontsize=7)
     for model_index, (model, model_label) in enumerate(MODEL_NAMES.items()):
         axis = figure.add_subplot(grid[1, model_index])
         choices = sorted({int(key.split(":")[1]) for method in ("hpgi", "fixed_split")
@@ -318,8 +316,10 @@ def mechanism_figures(plt, settings, central, output):
             denominator = sum(value for key, value in splits[method].items() if key.startswith(model + ":"))
             values = [100 * splits[method][f"{model}:{split}"] / denominator for split in choices]
             label = METHODS[method]
-            axis.bar(np.arange(len(choices)) + (method_index - .5) * .36, values, width=.36,
-                     color=settings["curve_styles"][label]["color"], label=label)
+            color = settings["curve_styles"][label]["color"]
+            axis.bar(np.arange(len(choices)) + (method_index - .5) * .36, values, width=.28,
+                     color=to_rgba(color, model_settings["bar_fill_alpha"]), edgecolor=color,
+                     linewidth=.5, label=label)
             points.extend(dict(method=method, model=model, metric="edge_split_share", split=split, value=value / 100)
                           for split, value in zip(choices, values))
         axis.set_xticks(np.arange(len(choices)), choices)
@@ -332,7 +332,7 @@ def mechanism_figures(plt, settings, central, output):
                   ncol=4, frameon=False, columnspacing=1.2)
     caption = "三模型均参与混合训练；下排为各模型边缘执行任务的切分比例。"
     figure.text(.52, .055, caption, ha="center", fontsize=8.2)
-    save_figure(figure, output, "F7_model_split", points, settings, caption)
+    save_figure(figure, output, "F7_model_split", points, model_settings, caption)
     plt.close(figure)
 
 
@@ -518,8 +518,9 @@ def gallery(output):
         if not path.exists() or not path.with_suffix(".pdf").exists():
             raise ValueError(f"Missing final figure: {path}")
         relative = Path(os.path.relpath(path, output)).as_posix()
+        image_url = relative + "?v=" + digest(path)[:12]
         sections.append(f'<section><h2>{escape(title)}</h2><p>{escape(caption)}</p>'
-            f'<a href="{escape(relative)}"><img loading="lazy" src="{escape(relative)}" alt="{escape(title)}"></a>'
+            f'<a href="{escape(image_url)}"><img loading="lazy" src="{escape(image_url)}" alt="{escape(title)}"></a>'
             f'<p><a href="{escape(relative)}">PNG原图</a> · <a href="{escape(str(Path(relative).with_suffix(".pdf")).replace(chr(92), "/"))}">矢量PDF</a></p></section>')
     for name in ("T1_setup", "T2_main_metrics", "T3_serial_timing", "T4_exact_reference"):
         path = output / f"tables/{name}.md"
@@ -612,7 +613,8 @@ def main():
         for axis, values, methods, xlabel, name, panels, context in definitions:
             groups = paired_groups(rows, methods, values, axis)
             metric_figure(plt, settings, groups, methods, values, xlabel, panels, output, name, context,
-                          y_limits={"cost_per_slot": (100, 220)} if axis == "bandwidth" else None)
+                          y_limits={"cost_per_slot": (125, 220), "on_time_rate": (50, 100)}
+                          if axis == "bandwidth" else None)
             summaries.extend({"axis": axis, "value": value, **aggregate_group(group)}
                              for (value, method), group in groups.items())
             for value in values:
