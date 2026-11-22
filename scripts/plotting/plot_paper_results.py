@@ -171,10 +171,13 @@ def save_figure(figure, output, name, points, settings, caption):
     write_csv(directory / "plot_data.csv", points)
     write_json(directory / "plot_config.json", {"styles": settings["curve_styles"], "dpi": settings["dpi"],
         "caption": caption, "smoothing": None, "bootstrap_replicates": 5000, "bootstrap_seed": 0,
+        "axes": [{"title": axis.get_title(loc="left"), "ylim": list(axis.get_ylim()),
+                  "yscale": axis.get_yscale()} for axis in figure.axes],
         "uncertainty": "Paired request-trajectory bootstrap, not training-seed uncertainty"})
 
 
-def metric_figure(plt, settings, groups, methods, values, axis_name, panels, output, name, context):
+def metric_figure(plt, settings, groups, methods, values, axis_name, panels, output, name, context,
+                  *, y_limits=None):
     from matplotlib import ticker
     figure, axes = plt.subplots(2, 2, figsize=(180 / 25.4, 141 / 25.4))
     figure.subplots_adjust(left=.09, right=.975, top=.845, bottom=.15, wspace=.31, hspace=.43)
@@ -217,6 +220,8 @@ def metric_figure(plt, settings, groups, methods, values, axis_name, panels, out
                           ha="center", fontsize=8)
         else:
             axis.set_ylim(bottom=0)
+        if y_limits and metric in y_limits:
+            axis.set_ylim(*y_limits[metric])
     figure.legend(handles, list(methods.values()), loc="upper center", bbox_to_anchor=(.52, .99),
                   ncol=4 if len(methods) > 4 else 3, frameon=False, handlelength=3, columnspacing=1.25)
     caption = "固定权重、确定性决策；每点20条独立请求轨迹，误差棒为轨迹bootstrap 95%区间。"
@@ -299,6 +304,12 @@ def mechanism_figures(plt, settings, central, output):
     service_axis.set_title("(a) 混合业务中的分模型服务", loc="left", pad=8)
     service_axis.grid(axis="y", color=".9", linewidth=.4, linestyle="--")
     service_axis.set_axisbelow(True)
+    for position, model in enumerate(MODEL_NAMES):
+        if all(models[method][model]["completed"] == models[method][model]["published"]
+               for method in METHODS):
+            counts = models["hpgi"][model]
+            rate = 100 * counts["published"] / counts["arrivals"]
+            service_axis.text(position, rate + 2, "达到共同发布率上限", ha="center", fontsize=7)
     for model_index, (model, model_label) in enumerate(MODEL_NAMES.items()):
         axis = figure.add_subplot(grid[1, model_index])
         choices = sorted({int(key.split(":")[1]) for method in ("hpgi", "fixed_split")
@@ -600,7 +611,8 @@ def main():
         ]
         for axis, values, methods, xlabel, name, panels, context in definitions:
             groups = paired_groups(rows, methods, values, axis)
-            metric_figure(plt, settings, groups, methods, values, xlabel, panels, output, name, context)
+            metric_figure(plt, settings, groups, methods, values, xlabel, panels, output, name, context,
+                          y_limits={"cost_per_slot": (100, 220)} if axis == "bandwidth" else None)
             summaries.extend({"axis": axis, "value": value, **aggregate_group(group)}
                              for (value, method), group in groups.items())
             for value in values:
