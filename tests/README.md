@@ -43,3 +43,6 @@ test_state_relations.py检查请求分组反例、目标服务器/既有指派�
 test_convergence.py覆盖奖励窗口稳定/趋势/波动、两种评价一致判定、尾部重置和恢复；短PPO集成核对实际保存次数、只保留last.pt、详细诊断清理及完整CSV，测试使用固定评价替身只验证停止控制，不作为性能结果。轨迹清理测试覆盖upper/lower/joint命名、重复清理和路径穿越拒绝；test_joint_ppo.py以8批预训练＋23轮联合微型训练跨越每10阶段详记/保留2组时的首次joint淘汰，检查全部CSV保留及重载第24轮。空请求诊断统计无分母时返回null。
 
 python -m mist_sim.verification先执行这些测试，再完成全部方法16/17隙短验证及HPGI续训，并在同一个临时空间完成CLI/日志核验；退出后自动删除权重、轨迹和索引，不写正式logs/runs/results。pytest的tmp_path也随用随清。仅需保留排障现场时显式指定--keep-artifacts 新目录；后续处理完自行清理，不默认归档。无性能阈值，不要求收敛。独立SciPy对照可能报告SLSQP尝试点被裁到界内的警告，必须以收敛状态及最终目标差判定。
+
+
+test_evidence_strengthening.py覆盖固定服务器首次唤醒不能服务、后续保持/唤醒计账及重放一致；仅完整字段一致的服务器才能归并；固定切分候选与控制预留覆盖不改变原输入；开发选择使用完整成本和总槽数分母。与test_frozen_evaluation.py联合运行共10项，不启动正式训练。

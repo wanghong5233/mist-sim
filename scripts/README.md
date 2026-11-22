@@ -6,6 +6,8 @@ HPGI改进试验（历史代码名HARP）使用`python -m mist_sim train --metho
 
 |目录|入口|用途|
 |---|---|---|
+|evaluation/|python -m scripts.evaluation.strengthen_evidence prepare/preflight/static/latency|冻结原源码/权重和独立开发/测试输入；预检后按81服务器、64切分、81服务器三步选择，保留全部分数并作独立测试；另补评控制预留60/80ms。最多两路各4worker，分别4h/2h上限，无训练，原始JSONL/CSV归同一运行|
+|evaluation/|python -m scripts.evaluation.report_strengthening diagnose/report|主补评完成后，条件触发40条中负载固定服务器交叉诊断（30min上限）；report复算全部候选、分母与配对区间、验证来源哈希，并把静态/控制预留/交叉诊断表加入已有图表入口，不重绘原七图|
 |evaluation/|compare_hpgi_refinement.py --parent Fixed的last.pt --parent-revision 完整提交 --seeds 开发种子列表 --output results/comparisons/名称|相同成熟Fixed权重及相同请求下比较固定切分、仅切分优化、联合指派/接纳交换；4个CPU进程，无训练/详细轨迹。运行前保存配置/来源/种子，逐轨迹CSV含成本、服务、能耗及实测推理时间；校验输入配对和父权重未变。属于开发机制比较，不代替从头多种子|
 |training/|develop_hpgi.py --parent 父last.pt --parent-revision 完整提交 --run-id 开发ID --seed 新训练种子 --eval-seeds 独立开发种子列表|默认保留最多5轮的历史切分迁移开发；显式传`--config 冻结完整配置 --cycles 10`则执行无搜索的原HPGI探索候选，经公开train入口训练，在同请求/动作种子上报告起点、训练后及最终温度下未更新父权重的随机/确定性结果。4worker/CUDA128、每10轮检查点、关闭详细轨迹由完整配置冻结；标量归results/comparisons，不能当从头独立种子|
 |evaluation/|evaluate_greedy.py --suite data/processed/evaluation/conditional-main-comparison-v1 --run-id evaluate-greedy-shared20|冻结20条128槽新请求输入，4进程执行同一贪心方法；无网络/训练。逐轨迹和池化CSV归results，物理记录及校验归logs/runs；逐轨迹样本标准差与池化指标分开，失败不填零。支持--trajectories/--first-seed/--workers/--overlay；叠加runtime/windows_performance.json时主进程和worker继承AboveNormal/HighQoS并保存读回值；既有输入校验哈希并检查训练种子交集|

@@ -303,8 +303,12 @@ def evaluation_config(config, probability, overrides=None):
     result = copy.deepcopy(config)
     result["arrival_probability"] = probability
     overrides = overrides or {}
-    if set(overrides) - {"k", "ap_bandwidth"}:
+    if set(overrides) - {"k", "ap_bandwidth", "control_seconds"}:
         raise ValueError("Only declared anonymity or shared AP capacity overrides are allowed")
+    if "control_seconds" in overrides:
+        if not 0 <= overrides["control_seconds"] < config["slot_seconds"]:
+            raise ValueError("Control reserve must be within a physical slot")
+        result["control_seconds"] = overrides["control_seconds"]
     if "k" in overrides:
         result["k"] = overrides["k"]
     if "ap_bandwidth" in overrides:

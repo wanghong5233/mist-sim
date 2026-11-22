@@ -21,6 +21,8 @@
 
 README管导航和命令；IMPLEMENTATION管当前语义；配置JSON管实际值。实验协议和SETUP保留在本机，不上传。修改替换旧描述、链接复用，Git负责源码历史。
 
+论文补证据入口为 `python -m scripts.evaluation.strengthen_evidence prepare/preflight/static/latency`，依次冻结设计、预检、静态选择与独立测试、控制预留补评。已完成运行不得重新 prepare。结束后运行 `python -m scripts.evaluation.report_strengthening diagnose` 执行条件触发的交叉诊断，`report` 核验全部候选、输入、权重与指标并更新既有图表入口；这些命令不更新学习权重。运行设计和原始结果仅在本机保存，具体用途见[脚本索引](scripts/README.md)。
+
 ## 目录
 
 ```text
