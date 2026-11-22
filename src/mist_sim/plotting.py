@@ -255,6 +255,10 @@ def plot_curves(settings, root):
                 else:
                     ax.ticklabel_format(axis="x", style="sci", scilimits=(0, 0), useMathText=True)
                 ax.yaxis.set_major_locator(ticker.MaxNLocator(nbins=5))
+                y_axis = settings.get("y_axes", {}).get(metric)
+                if y_axis:
+                    ax.set_yticks(y_axis["ticks"])
+                    ax.set_ylim(y_axis["limits"])
                 ax.legend(loc=settings.get("legend_location", "best"),
                           bbox_to_anchor=settings.get("legend_anchor"),
                           ncol=settings.get("legend_columns", 1), handlelength=3.4, columnspacing=1.2)

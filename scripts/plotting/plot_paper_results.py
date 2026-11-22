@@ -163,16 +163,17 @@ def line_style(settings, label):
             "markerfacecolor": "white", "markeredgewidth": .95}
 
 
-def save_figure(figure, output, name, points, settings, caption):
+def save_figure(figure, output, name, points, settings, caption, *, bar_styles=None):
     directory = output / "figures" / name
     directory.mkdir(parents=True, exist_ok=True)
     for extension in ("png", "pdf"):
         figure.savefig(directory / f"{name}_zh.{extension}", dpi=settings["dpi"], facecolor="white")
     write_csv(directory / "plot_data.csv", points)
     write_json(directory / "plot_config.json", {"styles": settings["curve_styles"], "dpi": settings["dpi"],
-        "bar_fill_alpha": settings.get("bar_fill_alpha", 1.0),
+        "bar_styles": bar_styles,
         "caption": caption, "smoothing": None, "bootstrap_replicates": 5000, "bootstrap_seed": 0,
         "axes": [{"title": axis.get_title(loc="left"), "ylim": list(axis.get_ylim()),
+                  "yticks": [float(tick) for tick in axis.get_yticks()],
                   "yscale": axis.get_yscale()} for axis in figure.axes],
         "uncertainty": "Paired request-trajectory bootstrap, not training-seed uncertainty"})
 
@@ -192,7 +193,8 @@ def metric_figure(plt, settings, groups, methods, values, axis_name, panels, out
             estimates = np.array([interval(groups[value, source_method], source_metric) for value in values]) * scale
             style_label = label if metric != "gateway" else ("Greedy" if method == "suppression_rate" else "Fixed-Window")
             style = line_style(settings, style_label)
-            line, = axis.plot(values, estimates[:, 0], label=label, zorder=5 if method == "hpgi" else 3, **style)
+            line, = axis.plot(values, estimates[:, 0], label=label, zorder=5 if method == "hpgi" else 3,
+                              clip_on=False, **style)
             axis.errorbar(values, estimates[:, 0], yerr=[np.maximum(0, estimates[:, 0] - estimates[:, 1]),
                 np.maximum(0, estimates[:, 2] - estimates[:, 0])], fmt="none", color=style["color"],
                 elinewidth=.7, capsize=2, capthick=.7, zorder=2)
@@ -214,15 +216,16 @@ def metric_figure(plt, settings, groups, methods, values, axis_name, panels, out
         if metric in ("on_time_rate", "on_time_rate_published", "bandwidth_utilization"):
             axis.set_ylim(0, 102)
         elif metric == "timeout_accepted":
-            axis.set_ylim(bottom=-.4)
-            if all(interval(groups[value, method], metric)[0] == 0 for value in values
-                   for method in ("hpgi", "full_information")):
-                axis.text(.5, .09, "HPGI与Full-Information均为0", transform=axis.transAxes,
-                          ha="center", fontsize=8)
+            axis.set_ylim(bottom=-.6)
         else:
             axis.set_ylim(bottom=0)
         if y_limits and metric in y_limits:
             axis.set_ylim(*y_limits[metric])
+        lower, upper = axis.get_ylim()
+        ticks = axis.get_yticks()
+        spacing = ticks[1] - ticks[0]
+        axis.set_yticks([lower, *[tick for tick in ticks if lower + .6 * spacing <= tick <= upper]])
+        axis.set_ylim(lower, upper)
     figure.legend(handles, list(methods.values()), loc="upper center", bbox_to_anchor=(.52, .99),
                   ncol=4 if len(methods) > 4 else 3, frameon=False, handlelength=3, columnspacing=1.25)
     caption = "固定权重、确定性决策；每点20条独立请求轨迹，误差棒为轨迹bootstrap 95%区间。"
@@ -287,27 +290,33 @@ def mechanism_figures(plt, settings, central, output):
             for model, counts in row["mechanism"]["models"].items():
                 models[method][model].update(counts)
             splits[method].update(row["mechanism"]["splits"])
-    figure = plt.figure(figsize=(180 / 25.4, 139 / 25.4))
-    grid = figure.add_gridspec(2, 3, left=.085, right=.98, top=.84, bottom=.15, hspace=.6, wspace=.4)
+    from matplotlib import ticker
+    figure = plt.figure(figsize=(180 / 25.4, 122 / 25.4))
+    grid = figure.add_gridspec(2, 3, left=.085, right=.975, top=.83, bottom=.16, hspace=.48, wspace=.38)
     service_axis = figure.add_subplot(grid[0, :])
     points = []
     positions = np.arange(3)
     width = .105
-    from matplotlib.colors import to_rgba
-    model_settings = {**settings, "bar_fill_alpha": .72}
+    bar_styles = {
+        method: {"facecolor": settings["curve_styles"][label]["color"],
+                 "edgecolor": "white", "linewidth": .4}
+        for method, label in METHODS.items()
+    }
     for method_index, (method, label) in enumerate(METHODS.items()):
         values = [100 * models[method][model]["completed"] / models[method][model]["arrivals"] for model in MODEL_NAMES]
-        color = settings["curve_styles"][label]["color"]
-        service_axis.bar(positions + (method_index - 3) * width, values, width=width * .78, label=label,
-                         color=to_rgba(color, model_settings["bar_fill_alpha"]), edgecolor=color, linewidth=.5)
+        service_axis.bar(positions + (method_index - 3) * width, values, width=width * .82,
+                         label=label, **bar_styles[method])
         points.extend(dict(method=method, model=model, metric="on_time_rate", split="", value=value / 100)
                       for model, value in zip(MODEL_NAMES, values))
     service_axis.set_xticks(positions, list(MODEL_NAMES.values()))
-    service_axis.set_ylim(0, 102)
+    service_axis.set_xlim(-.5, 2.5)
+    service_axis.set_ylim(0, 103)
+    service_axis.set_yticks([0, 25, 50, 75, 100])
     service_axis.set_ylabel("全部到达按时率 / %")
     service_axis.set_title("(a) 混合业务中的分模型服务", loc="left", pad=8)
     service_axis.grid(axis="y", color=".9", linewidth=.4, linestyle="--")
     service_axis.set_axisbelow(True)
+    service_axis.xaxis.set_minor_locator(ticker.NullLocator())
     for model_index, (model, model_label) in enumerate(MODEL_NAMES.items()):
         axis = figure.add_subplot(grid[1, model_index])
         choices = sorted({int(key.split(":")[1]) for method in ("hpgi", "fixed_split")
@@ -316,23 +325,23 @@ def mechanism_figures(plt, settings, central, output):
             denominator = sum(value for key, value in splits[method].items() if key.startswith(model + ":"))
             values = [100 * splits[method][f"{model}:{split}"] / denominator for split in choices]
             label = METHODS[method]
-            color = settings["curve_styles"][label]["color"]
             axis.bar(np.arange(len(choices)) + (method_index - .5) * .36, values, width=.28,
-                     color=to_rgba(color, model_settings["bar_fill_alpha"]), edgecolor=color,
-                     linewidth=.5, label=label)
+                     label=label, **bar_styles[method])
             points.extend(dict(method=method, model=model, metric="edge_split_share", split=split, value=value / 100)
                           for split, value in zip(choices, values))
         axis.set_xticks(np.arange(len(choices)), choices)
         axis.set_ylim(0, 105)
+        axis.set_yticks([0, 25, 50, 75, 100])
+        axis.xaxis.set_minor_locator(ticker.NullLocator())
         axis.set_xlabel("实际切分点")
         axis.set_title(f"({chr(98 + model_index)}) {model_label}", loc="left", pad=8)
         if model_index == 0:
             axis.set_ylabel("边缘任务中占比 / %")
-    figure.legend(*service_axis.get_legend_handles_labels(), loc="upper center", bbox_to_anchor=(.52, .98),
-                  ncol=4, frameon=False, columnspacing=1.2)
+    figure.legend(*service_axis.get_legend_handles_labels(), loc="upper center", bbox_to_anchor=(.52, .99),
+                  ncol=4, frameon=False, columnspacing=1.2, handlelength=1.2)
     caption = "三模型均参与混合训练；下排为各模型边缘执行任务的切分比例。"
-    figure.text(.52, .055, caption, ha="center", fontsize=8.2)
-    save_figure(figure, output, "F7_model_split", points, model_settings, caption)
+    figure.text(.52, .035, caption, ha="center", fontsize=8.2)
+    save_figure(figure, output, "F7_model_split", points, settings, caption, bar_styles=bar_styles)
     plt.close(figure)
 
 
@@ -479,10 +488,24 @@ def exact_table(specification, output):
 
 def provenance(spec_path, output, sources):
     specification = read_json(spec_path)
+    previous = read_json(output / "provenance.json") if (output / "provenance.json").exists() else {}
+    figure_updates = previous.get("training_figure_updates", {})
     for path, expected_hash in specification["figure_provenance"].items():
-        if digest(path) != expected_hash:
-            raise ValueError("Confirmed training-figure provenance changed")
-        sources[path] = expected_hash
+        current_hash = digest(path)
+        if current_hash != expected_hash:
+            update = figure_updates.get(path, {})
+            if (update.get("original_provenance_sha256") != expected_hash or
+                    update.get("presentation_provenance_sha256") != current_hash or
+                    set(update.get("unchanged_data_sha256", {})) != {"source_data.csv", "aggregate.csv"}):
+                raise ValueError("Confirmed training-figure provenance changed")
+            for filename, data_hash in update["unchanged_data_sha256"].items():
+                data_path = Path(path).parent / filename
+                if digest(data_path) != data_hash:
+                    raise ValueError("Training-figure data changed during presentation revision")
+                sources[str(data_path)] = data_hash
+            if read_json(path)["source_data_sha256"] != update["unchanged_data_sha256"]["source_data.csv"]:
+                raise ValueError("Training-figure provenance refers to different data")
+        sources[path] = current_hash
     for directory, basename in (("learning-baselines", "reward_per_slot_zh"),
                                  ("information-baselines", "service_zh")):
         for extension in ("png", "pdf"):
@@ -491,6 +514,7 @@ def provenance(spec_path, output, sources):
     assets = {str(path.relative_to(output)): digest(path) for path in output.rglob("*")
               if path.is_file() and path.name != "provenance.json"}
     write_json(output / "provenance.json", {"spec": str(spec_path), "spec_sha256": digest(spec_path),
+        "training_figure_updates": figure_updates,
         "script_sha256": digest(__file__), "sources": sources, "outputs": assets, "training_updates": 0,
         "base_spec_sha256": specification["base_spec_sha256"],
         "scope": "Frozen-policy transfer; one trained seed; request-trajectory uncertainty only"})
@@ -610,11 +634,18 @@ def main():
               ("edge_per_slot", "边缘执行任务", "任务数 / 时隙", 1),
               ("bandwidth_utilization", "预留带宽利用率", "平均利用率 / %", 100)], "每请求预留10MHz不变；每AP可并发2/3/4/5/6项边缘任务。"),
         ]
+        panel_limits = {
+            "load": {"cost_per_slot": (40, 280), "energy_per_slot": (10, 185),
+                     "on_time_rate": (35, 95), "on_time_rate_published": (60, 102)},
+            "anonymity": {"on_time_rate": (30, 100), "on_time_rate_published": (70, 100),
+                          "timeout_accepted": (0, 21), "gateway": (0, 103)},
+            "bandwidth": {"cost_per_slot": (125, 220), "on_time_rate": (50, 100),
+                          "edge_per_slot": (0, 11), "bandwidth_utilization": (0, 103)},
+        }
         for axis, values, methods, xlabel, name, panels, context in definitions:
             groups = paired_groups(rows, methods, values, axis)
             metric_figure(plt, settings, groups, methods, values, xlabel, panels, output, name, context,
-                          y_limits={"cost_per_slot": (125, 220), "on_time_rate": (50, 100)}
-                          if axis == "bandwidth" else None)
+                          y_limits=panel_limits[axis])
             summaries.extend({"axis": axis, "value": value, **aggregate_group(group)}
                              for (value, method), group in groups.items())
             for value in values:
