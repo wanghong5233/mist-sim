@@ -279,8 +279,7 @@ def mechanism_figures(plt, settings, central, output):
                       for method, value in zip(METHODS, values))
     figure.legend(*energy_axis.get_legend_handles_labels(), loc="upper center", bbox_to_anchor=(.55, .97),
                   ncol=5, frameon=False, columnspacing=1)
-    caption = "同一中负载测试集；各方法服务水平见表T2，能耗包含端侧、传输及服务器运行与唤醒开销。"
-    figure.text(.52, .05, caption, ha="center", fontsize=8.2)
+    caption = "中负载下的实际能耗分解、平均活跃服务器数与启停次数。"
     save_figure(figure, output, "F6_energy_mechanism", points, settings, caption)
     plt.close(figure)
     models, splits = {}, {}
@@ -339,7 +338,7 @@ def mechanism_figures(plt, settings, central, output):
             axis.set_ylabel("边缘任务中占比 / %")
     figure.legend(*service_axis.get_legend_handles_labels(), loc="upper center", bbox_to_anchor=(.52, .99),
                   ncol=4, frameon=False, columnspacing=1.2, handlelength=1.2)
-    caption = "三模型均参与混合训练；下排为各模型边缘执行任务的切分比例。"
+    caption = "上排比较七种方法；下排仅比较HPGI与Fixed-Split的边缘任务切分比例。"
     figure.text(.52, .035, caption, ha="center", fontsize=8.2)
     save_figure(figure, output, "F7_model_split", points, settings, caption, bar_styles=bar_styles)
     plt.close(figure)
