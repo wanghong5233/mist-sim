@@ -4,7 +4,7 @@
 
 ## 仓库与隐私
 
-远端为私有仓库`wanghong5233/mist-sim`。只提交源码、配置、测试及必要说明；results、logs、data中的实测资产、权重、原始图像、实验协议和本机执行记录均忽略，论文不在此仓库内。推送前执行`python scripts/maintenance/check_publish.py`，检查当前暂存内容与历史；首次建库不导入科研根仓库历史。Git提交使用GitHub noreply邮箱。
+代码仓库：[wanghong5233/mist-sim](https://github.com/wanghong5233/mist-sim)，公开访问。只提交源码、配置、测试及必要说明；results、logs、data中的实测资产、权重、原始图像、实验协议和本机执行记录均忽略，论文不在此仓库内。推送前执行`python scripts/maintenance/check_publish.py`，检查当前暂存内容与历史；首次建库不导入科研根仓库历史。Git提交使用GitHub noreply邮箱。
 
 本机布局为`02_实验/mist-sim/`。科研父仓库以子模块记录这个独立仓库的提交，不重复管理源码；提交/推送仿真时进入mist-sim。克隆本仓库无需导师论文或MERA检出即可运行合成输入检查；数据恢复见[data说明](data/README.md)。父仓库只在本地更新引用，不随仿真push上传。
 
